@@ -32,8 +32,8 @@ exit /b 1
 echo.
 echo [OK] Tache planifiee creee avec succes : "%TASK_NAME%"
 echo [OK] Le bot demarrera automatiquement au prochain demarrage de Windows.
-echo [OK] 6 instances (EURUSD, GBPUSD, AUDUSD, USDJPY, USDCHF, XAUUSD)
-echo [OK] Timeframe M15 (XAUUSD: H1), demarrage differe de 30 secondes
+echo [OK] 6 symboles (EURUSD, GBPUSD, AUDUSD, USDJPY, USDCHF, XAUUSD)
+echo [OK] Timeframe M15 (XAUUSD: H1), cycle toutes les 15 min
 
 echo.
 echo --- Commandes utiles ---
