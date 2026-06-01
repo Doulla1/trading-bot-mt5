@@ -104,11 +104,30 @@ def run_symbol(cfg: dict) -> None:
 
     # Surcharger les settings pour ce symbole
     from src.config import settings
+    previous_symbol = settings.trading_symbol
     settings.trading_symbol = sym
     settings.trading_timeframe = tf
     settings.mt5_magic_number = magic
 
-    logger.info(f"--- {sym} {tf} ---")
+    # Reconfigurer le logger pour ecrire dans le bon dossier de symbole
+    if sym != previous_symbol:
+        from loguru import logger as loguru_logger
+        loguru_logger.remove()  # supprime les handlers existants
+        loguru_logger.add(
+            sys.stderr,
+            level=settings.log_level,
+            format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+            colorize=True,
+        )
+        loguru_logger.add(
+            str(settings.log_path),
+            level="DEBUG",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
+            rotation="1 day",
+            retention="15 days",
+            encoding="utf-8",
+        )
+        logger.info(f"Logger reconfigure pour {sym} -> {settings.log_path}")
 
     logger.info(f"--- {sym} {tf} ---")
 
