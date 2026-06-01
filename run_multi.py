@@ -123,7 +123,7 @@ def run_symbol(cfg: dict) -> None:
             str(settings.log_path),
             level="DEBUG",
             format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
-            rotation="1 day",
+            rotation="00:00",
             retention="15 days",
             encoding="utf-8",
         )
