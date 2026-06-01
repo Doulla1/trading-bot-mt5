@@ -52,17 +52,19 @@ function Start-Instance {
     New-Item -ItemType Directory -Force -Path (Split-Path $logFile) | Out-Null
 
     # Verifier si l'instance tourne deja
-    $proc = Get-Process -Name "python*" -ErrorAction SilentlyContinue | Where-Object {
-        $_.CommandLine -match "run.py.*--symbol $sym"
-    }
-    if ($proc) {
-        Write-Host "[$sym] Deja en cours (PID $($proc.Id))" -ForegroundColor Yellow
+    $procs = Get-CimInstance -ClassName Win32_Process -Filter "Name like 'python%'" -ErrorAction SilentlyContinue
+    $existing = $procs | Where-Object { $_.CommandLine -match "run\.py.*--symbol $sym" }
+    if ($existing) {
+        Write-Host "[$sym] Deja en cours (PID $($existing.ProcessId))" -ForegroundColor Yellow
         return
     }
 
-    # Lancer avec pythonw.exe (pas de console) en passant les variables d'env
+    # Lancer avec pythonw.exe (pas de console) en mode detache
+    $logFile = "$rootDir\logs\$($sym.ToLower())\launcher.log"
+    New-Item -ItemType Directory -Force -Path (Split-Path $logFile) | Out-Null
+
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = $pythonw
+    $startInfo.FileName = "pythonw.exe"
     $startInfo.Arguments = "run.py --symbol $sym"
     $startInfo.WorkingDirectory = $rootDir
     $startInfo.UseShellExecute = $false
@@ -79,30 +81,33 @@ function Start-Instance {
 
 function Stop-All {
     Write-Host "Arret de toutes les instances..." -ForegroundColor Cyan
-    Get-Process -Name "python*" -ErrorAction SilentlyContinue | Where-Object {
-        $_.CommandLine -match "run.py.*--symbol"
-    } | ForEach-Object {
-        Write-Host "  Arret PID $($_.Id): $($_.CommandLine)" -ForegroundColor Red
-        $_.Kill()
+    $procs = Get-CimInstance -ClassName Win32_Process -Filter "Name like 'python%'" -ErrorAction SilentlyContinue
+    $running = $procs | Where-Object { $_.CommandLine -match "run\.py.*--symbol" }
+    foreach ($p in $running) {
+        Write-Host "  Arret PID $($p.ProcessId): $($p.CommandLine)" -ForegroundColor Red
+        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
     }
 }
 
 function Show-Status {
-    Write-Host "`n=== Instances du Trading Bot ===" -ForegroundColor Cyan
-    $running = Get-Process -Name "python*" -ErrorAction SilentlyContinue | Where-Object {
-        $_.CommandLine -match "run.py.*--symbol"
-    }
+    Write-Host "`n=== Instances du Trading Bot ===`n" -ForegroundColor Cyan
+    $procs = Get-CimInstance -ClassName Win32_Process -Filter "Name like 'python%'" -ErrorAction SilentlyContinue
+    $running = $procs | Where-Object { $_.CommandLine -match "run\.py.*--symbol" }
     if (-not $running) {
         Write-Host "Aucune instance en cours." -ForegroundColor Yellow
         return
     }
-    foreach ($proc in $running) {
-        $line = $proc.CommandLine
+    foreach ($p in $running) {
+        $line = $p.CommandLine
         if ($line -match "--symbol ([A-Z]+)") {
             $sym = $matches[1]
-            $tf = if ($line -match "TRADING_TIMEFRAME=([A-Z0-9]+)") { $matches[1] } else { "M15" }
-            $uptime = [math]::Round((Get-Date) - $proc.StartTime)
-            Write-Host "  [$sym] $tf | PID $($proc.Id) | uptime: $($uptime.TotalMinutes) min" -ForegroundColor Green
+            $startTime = $p.CreationDate
+            if ($startTime) {
+                $uptime = [math]::Round(((Get-Date) - $startTime).TotalMinutes, 1)
+                Write-Host "  [$sym] PID $($p.ProcessId) | uptime: ${uptime}min" -ForegroundColor Green
+            } else {
+                Write-Host "  [$sym] PID $($p.ProcessId)" -ForegroundColor Green
+            }
         }
     }
 }
