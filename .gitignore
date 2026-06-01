@@ -5,9 +5,9 @@ __pycache__/
 *.pyo
 *.egg-info/
 
-# Donnees et logs (isoles par symbole)
-data/
-logs/
+# Donnees et logs (isoles par symbole) - uniquement a la racine
+/data/
+/logs/
 
 # IDE
 .vscode/
