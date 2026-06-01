@@ -9,6 +9,10 @@ from pathlib import Path
 from loguru import logger
 import pandas as pd
 import numpy as np
+
+# Utiliser le backend non-interactif pour eviter les warnings
+import matplotlib
+matplotlib.use("Agg")
 import mplfinance as mpf
 from datetime import datetime
 
