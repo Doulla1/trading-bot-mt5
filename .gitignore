@@ -1,0 +1,25 @@
+# Environnement
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Donnees et logs (isoles par symbole)
+data/
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Build
+dist/
+build/
+*.egg-info/
