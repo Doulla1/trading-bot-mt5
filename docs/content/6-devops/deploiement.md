@@ -1,83 +1,89 @@
-# Deploiement et execution
+# Deploiement et execution v2.1
 
 ## Mode de fonctionnement
 
-Le bot est concu pour tourner sur une machine Windows **de bureau** ou **serveur** (Windows Server) avec MetaTrader 5 installe. Il n'est pas concu pour le cloud (necessite MT5 avec interface graphique).
+Le bot est concu pour tourner sur une machine Windows **de bureau** ou **serveur** avec MetaTrader 5.
 
-## Execution
-
-### Mode continu (boucle infinie)
+## Execution multi-symboles (recommande)
 
 ```powershell
-# Activer l'environnement virtuel
-.venv\Scripts\Activate.ps1
+# Tout lancer (detache, pas de fenetre)
+.\scripts\start-all.ps1
 
-# Lancer le bot
-python run.py
+# Voir l'etat
+.\scripts\start-all.ps1 -Status
+
+# Arreter
+.\scripts\start-all.ps1 -Stop
 ```
 
-Le bot tourne jusqu'a `Ctrl+C`. Il execute un cycle toutes les `ANALYSIS_INTERVAL_MINUTES` (defaut 15 min).
+Un seul processus (`run_multi.py`) gere les 6 actifs sequentiellement :
 
-### Mode execution unique
+```
+ROUND X (~7 min pour 6 symboles):
+  EURUSD (M15) → Analyse ~70s
+  GBPUSD (M15) → Analyse ~70s
+  AUDUSD (M15) → Analyse ~70s
+  USDJPY (M15) → Analyse ~70s
+  USDCHF (M15) → Analyse ~70s
+  XAUUSD (H1)  → Analyse toutes les 4 rondes (~60 min)
+```
+
+## Execution symbole unique
 
 ```powershell
-python run.py --once
+python run.py --symbol EURUSD              # Mode continu
+python run.py --symbol GBPUSD --once       # Execution unique
+python run.py --stats                      # Statistiques
 ```
-
-Utile pour :
-- Tester le bot sans engagement
-- Deboguer un probleme
-- Execution planifiee via le Planificateur de taches Windows
-
-### Affichage des statistiques
-
-```powershell
-python run.py --stats
-```
-
-Affiche les statistiques de la base SQLite sans lancer d'analyse.
 
 ## Logs
 
-Les logs sont geres par **Loguru** :
+Rotation **journaliere**, retention **15 jours**, par symbole :
 
-| Sortie | Emplacement | Format |
-|---|---|---|
-| Console | Stderr | `HH:MM:SS | NIVEAU | message` (colore) |
-| Fichier | `logs/trading-bot.log` | `YYYY-MM-DD HH:mm:ss.SSS | NIVEAU | module:fonction:ligne | message` |
-
-Configuration :
-- Rotation : 10 MB par fichier
-- Retention : 7 jours
-- Niveau : configurable via `LOG_LEVEL` dans le `.env`
+```
+logs/
+  eurusd/
+    trading-bot.2026-06-01.log
+    trading-bot.2026-06-02.log
+    ... (supprimes apres 15 jours)
+  gbpusd/
+    ...
+  xauusd/
+    ...
+```
 
 ```powershell
-# Surveiller les logs en temps reel (PowerShell)
-Get-Content logs/trading-bot.log -Tail 20 -Wait
+# Surveiller en temps reel
+Get-Content logs\eurusd\trading-bot.2026-06-01.log -Tail 20 -Wait
 
-# Ou avec tail pour Windows
-Get-Content logs/trading-bot.log -Tail 50
+# Dernieres lignes
+Get-Content logs\eurusd\trading-bot.2026-06-01.log -Tail 50
+```
+
+## Auto-start Windows
+
+```powershell
+# Executer EN TANT QU'ADMINISTRATEUR :
+scripts\install-autostart.bat
+```
+
+Cree une tache planifiee `TradingBot-IA` qui lance les 6 actifs au demarrage.
+
+```powershell
+# Supprimer l'auto-start
+schtasks /Delete /TN "TradingBot-IA" /F
 ```
 
 ## Base de donnees
 
-**Emplacement** : `data/trading.db` (configurable via `DATABASE_PATH`)
+Chaque symbole a sa propre base isolee :
 
-Le bot cree et maintient automatiquement la base. Pour inspecter :
-
-```powershell
-# Avec SQLite (si installe)
-sqlite3 data/trading.db "SELECT * FROM trades ORDER BY opened_at DESC LIMIT 10;"
-
-# Ou avec un outil graphique (DB Browser for SQLite, DBeaver)
-```
-
-## Planification automatique (Windows Task Scheduler)
-
-Pour lancer le bot automatiquement au demarrage de Windows :
-
-1. Ouvrir le Planificateur de taches
-2. Creer une tache :
+| Symbole | Emplacement |
+|---|---|
+| EURUSD | `data/eurusd/trading.db` |
+| GBPUSD | `data/gbpusd/trading.db` |
+| XAUUSD | `data/xauusd/trading.db` |
    - **Déclencheur** : Au demarrage
    - **Action** : Demarrer un programme
    - **Programme** : `C:\Users\...\trading-bot\.venv\Scripts\python.exe`

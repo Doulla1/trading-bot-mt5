@@ -15,69 +15,55 @@
 1. Ouvrir un compte demo sur [Fusion Markets](https://fusionmarkets.com)
 2. Telecharger et installer MetaTrader 5 depuis votre espace client Fusion Markets
 3. Connecter MT5 avec vos identifiants (login, mot de passe, serveur)
-4. Verifier que le graphique EURUSD s'affiche correctement
-5. (Optionnel) Ajouter d'autres paires de devises dans MarketWatch
-
-> **Important** : Le bot utilise l'API Python de MT5. **Vous devez activer le trading algorithmique dans MT5** :
-> 1. Menu `Outils` → `Options` → Onglet `Expert Advisors` → Cocher **"Allow Algo Trading"**
-> 2. Verifier que le bouton **Algo Trading** dans la barre d'outils est vert
-> 
-> Le terminal doit etre **lance** (pas besoin qu'il soit au premier plan).
+4. Ajouter les paires dans MarketWatch : EURUSD, GBPUSD, AUDUSD, USDJPY, USDCHF, XAUUSD
+5. Activer le trading algorithmique : `Outils` → `Options` → `Expert Advisors` → cocher **"Allow Algo Trading"**
 
 ## Etape 2 : Installer Python 3.11+
 
 ```powershell
-# Verifier la version
 python --version
-
-# Si python 3.11+ est installe, vous devriez voir :
-# Python 3.11.x
-
-# Sinon, telecharger depuis python.org
 ```
 
-## Etape 3 : Cloner le projet et creer l'environnement virtuel
+## Etape 3 : Cloner et creer l'environnement
 
 ```powershell
-# Cloner (ou copier) le projet
-cd C:\Users\votre-nom
-git clone <url-du-depot> trading-bot
+git clone https://github.com/Doulla1/trading-bot-mt5.git
 cd trading-bot
-
-# Creer l'environnement virtuel
 python -m venv .venv
-
-# Activer l'environnement virtuel
 .venv\Scripts\Activate.ps1
-
-# Vous devriez voir (.venv) dans le prompt
 ```
 
 ## Etape 4 : Installer les dependances
 
 ```powershell
-# Installation en mode editable (recommande)
-pip install -e .
-
-# Avec les dependances de developpement (tests, linting)
 pip install -e ".[dev]"
 ```
 
-## Etape 5 : Configurer le fichier .env
+Dependances : `MetaTrader5`, `openai`, `apscheduler`, `mplfinance`, `mss`, `loguru`, `pydantic-settings`, `tenacity`, `rich`.
 
-```powershell
-# Creer le fichier .env a partir du template
-# (copier manuellement ou creer avec notepad)
-notepad .env
-```
-
-Contenu minimum :
+## Etape 5 : Configurer le .env
 
 ```env
-OPENAI_API_KEY=sk-votre-cle-api
-MT5_LOGIN=12345678
+# API IA
+OPENAI_API_KEY=sk-votre-cle-openai
+DEEPSEEK_API_KEY=sk-votre-cle-deepseek
+
+# MT5
+MT5_LOGIN=371699
 MT5_PASSWORD=votre-mot-de-passe
 MT5_SERVER=FusionMarkets-Demo
+MT5_MAGIC_NUMBER=73456
+
+# Trading
+TRADING_SYMBOL=EURUSD
+TRADING_TIMEFRAME=M15
+
+# Risques
+MAX_RISK_PER_TRADE_PCT=1.0
+MAX_DAILY_LOSS_PCT=3.0
+MAX_OPEN_POSITIONS=1
+MIN_CONFIDENCE_THRESHOLD=70
+```
 ```
 
 Voir [Configuration](../4-technique/configuration.md) pour la liste complete des variables.
