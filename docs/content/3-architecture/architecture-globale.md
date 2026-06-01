@@ -1,48 +1,55 @@
-# Architecture globale
+# Architecture globale v2.1
 
 ## Diagramme C4 - Niveau 1 (Contexte Systeme)
 
 ```mermaid
 flowchart TD
     subgraph MT5["MetaTrader 5 (Fusion Markets)"]
-        CHART[Chart OHLCV - 200 bougies]
+        CHART[Chart OHLCV - 200 bougies M15 + 100 H1]
         EXEC[Trade Execution - ordres]
         ACCT[Account Info - balance, positions]
     end
-    subgraph BOT["Trading Bot IA"]
+    subgraph BOT["Trading Bot IA v2.1"]
         BRIDGE[bridge.py - Connexion MT5]
-        INDIC[indicators.py - RSI, MACD, Bollinger...]
-        SCR[screenshots.py - Capture 800x600]
-        CAL[calendar.py - ForexFactory]
-        DB[database.py - SQLite locale]
-        AI[vision.py - GPT-4o-mini Vision]
-        STRAT[strategy.py - Risk Management]
+        INDIC[indicators.py - RSI, MACD, ADX, Ichimoku, Pivots, Patterns]
+        CHARTGEN[chart_renderer.py - Generation chart pro]
+        SCR[screenshots.py - Capture debug]
+        CAL[calendar.py - ForexFactory + cache]
+        DB[database.py - SQLite + memoire]
+        OCR[ocr.py - GPT-4o-mini OCR chart]
+        ANALYZER[analyzer.py - DeepSeek V4 Pro decision]
+        STRAT[strategy.py - Risk + Position management]
         SCHED[scheduler.py - Orchestrateur]
     end
-    subgraph AI_SVC["OpenAI API"]
-        GPT[GPT-4o-mini - Vision + NLP]
+    subgraph AI_SVC["API IA"]
+        GPT[GPT-4o-mini - Vision OCR]
+        DS[DeepSeek V4 Pro - Decision 1M contexte]
     end
-    subgraph WEB["Web (ForexFactory)"]
+    subgraph WEB["Web"]
         FF[Calendrier economique]
     end
 
     MT5 <-->|"OHLCV + Positions + Ordres"| BRIDGE
-    MT5 -->|"Screenshot PNG"| SCR
     BRIDGE -->|"DataFrame pandas"| INDIC
-    SCR -->|"Image base64"| AI
-    INDIC -->|"dict indicateurs"| AI
-    CAL -->|"list[dict] evenements"| AI
-    FF -->|"HTTP GET + BeautifulSoup"| CAL
-    AI -->|"JSON request (image+prompt)"| GPT
-    GPT -->|"JSON decision"| AI
-    AI -->|"action, confidence, SL, TP"| STRAT
+    BRIDGE -->|"DataFrame"| CHARTGEN
+    INDIC -->|"dict indicateurs"| CHARTGEN
+    CHARTGEN -->|"Chart PNG"| OCR
+    OCR -->|"JSON chart"| ANALYZER
+    INDIC -->|"dict enrichi"| ANALYZER
+    CAL -->|"evenements"| ANALYZER
+    DB -->|"historique + stats"| ANALYZER
+    FF -->|"HTTP GET"| CAL
+    OCR -->|"image+prompt"| GPT
+    GPT -->|"JSON OCR"| OCR
+    ANALYZER -->|"texte complet"| DS
+    DS -->|"JSON decision"| ANALYZER
+    ANALYZER -->|"decision"| STRAT
     STRAT -->|"ordre MT5"| EXEC
-    SCHED -->|"run_once() cycle"| BRIDGE
-    SCHED -->|"capture_chart()"| SCR
+    STRAT -->|"breakeven/trailing"| EXEC
+    SCHED -->|"run_once()"| BRIDGE
+    SCHED -->|"manage_positions()"| STRAT
     SCHED -->|"fetch_events()"| CAL
-    SCHED -->|"analyze()"| AI
-    SCHED -->|"execute_decision()"| STRAT
-    DB -->|"log_analysis() + log_trade()"| SCHED
+    SCHED -->|"log_*()"| DB
 ```
 
 ## Description des systemes
@@ -89,15 +96,44 @@ flowchart LR
     UTILS --> CFG
 ```
 
-## Modules internes
+## Modules internes v2.1
 
 ### `src/config.py`
+Configuration centralisee via `pydantic-settings`. Charge le `.env`, chemins isoles par symbole.
 
-Configuration centralisee via `pydantic-settings`. Charge le fichier `.env` et expose les parametres sous forme de proprietes type-safe (voir [Configuration](../4-technique/configuration.md)).
-
-### `src/mt5/` - Bridge MT5
+### `src/mt5/` - Bridge MT5 + Indicateurs + Charts
 
 | Fichier | Responsabilite |
+|---|---|
+| `bridge.py` | Connexion MT5, OHLCV, infos compte, verification marche |
+| `executor.py` | Ordres BUY/SELL/CLOSE, calcul position size, modification SL |
+| `indicators.py` | RSI, MACD, ADX, Ichimoku Kinko Hyo, Pivot Points, Bollinger, ATR, patterns chandeliers, structure marche (HH/HL) |
+| `chart_renderer.py` | **v2.1** - Generation chart professionnel (Ichimoku, EMA, BB, Pivots) via mplfinance |
+| `screenshots.py` | Capture ecran debug via mss |
+
+### `src/ai/` - Intelligence Artificielle (v2.1)
+
+| Fichier | Responsabilite |
+|---|---|
+| `ocr.py` | **v2.0** - GPT-4o-mini Vision: extraction visuelle du chart (niveaux S/R, patterns, phase) |
+| `analyzer.py` | **v2.0** - DeepSeek V4 Pro: decision finale avec contexte 1M tokens + memoire |
+| `prompts.py` | Construction prompts (OCR + Decision + Memoire + Performance) |
+| `strategy.py` | Risk management + **v2.0** position management (breakeven, trailing stop, time exit) |
+| `vision.py` | Legacy - fallback GPT-4o-mini (remplace par ocr.py + analyzer.py) |
+
+### `src/data/` - Donnees
+
+| Fichier | Responsabilite |
+|---|---|
+| `calendar.py` | Scraping ForexFactory avec cache SQLite 4h |
+| `database.py` | SQLite thread-safe, CRUD trades/analysis, bot_state, calendar_cache |
+| `models.py` | Dataclasses Trade, AnalysisLog |
+
+### `src/scheduler/` - Orchestrateur
+
+| Fichier | Responsabilite |
+|---|---|
+| `scheduler.py` | Pipeline complet: gestion positions → reconciliation → indicateurs multi-TF → chart genere → OCR → Decision DeepSeek → execution |
 |---|---|
 | `bridge.py` | Connexion/deconnexion MT5, recuperation OHLCV, infos compte et symbole |
 | `executor.py` | Ordres de trading (ouverture, fermeture), calcul de volume, position sizing |

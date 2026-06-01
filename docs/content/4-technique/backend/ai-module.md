@@ -1,53 +1,109 @@
-# Module IA : vision.py, strategy.py, prompts.py
+# Module IA v2.1 : ocr.py, analyzer.py, strategy.py, prompts.py
 
 ## Vue d'ensemble
 
-Le module `src/ai/` est le cerveau du bot. Il contient l'interface avec GPT-4o-mini, la logique de decision et les templates de prompts.
+Le module `src/ai/` est le cerveau du bot. Architecture en deux etages :
+- **OCR** (GPT-4o-mini Vision) : extraction visuelle du chart
+- **Analyzer** (DeepSeek V4 Pro) : decision finale avec tout le contexte
 
 ```
 src/ai/
   __init__.py
-  vision.py       # Analyse GPT-4o-mini Vision
-  strategy.py     # Moteur de strategie + risk management
-  prompts.py      # Construction du prompt
+  ocr.py         # v2.0 - GPT-4o-mini: extraction visuelle uniquement
+  analyzer.py    # v2.0 - DeepSeek V4 Pro: decision avec memoire 1M
+  prompts.py     # v2.0 - Prompts OCR + Decision + Memoire + Performance
+  strategy.py    # v2.0 - Risk management + position management
+  vision.py      # Legacy - fallback GPT-4o-mini (deprecie)
 ```
 
-## `vision.py` - Analyse GPT-4o-mini Vision
+---
 
-**Fichier** : `src/ai/vision.py`
+## `ocr.py` - GPT-4o-mini Vision (extraction visuelle)
 
-### `analyze(screenshot_path, symbol, timeframe, indicators, calendar_events, open_positions, account_info) -> dict | None`
+**Fichier** : `src/ai/ocr.py`
 
-Fonction principale qui envoie le screenshot et les donnees a GPT-4o-mini et retourne la decision.
+### `extract_chart_structure(screenshot_path, symbol, timeframe) -> dict | None`
 
-**Algorithme** :
+Analyse le chart genere (mplfinance) et extrait UNIQUEMENT les elements visuels. **Ne prend PAS de decision.**
 
-1. **Ouverture et compression** de l'image via Pillow (redimension 512x384, JPEG 80%)
-2. **Encodage base64** du JPEG compresse
-3. **Construction du prompt** via `build_analysis_prompt()`
-4. **Appel API** OpenAI (modele `gpt-4o-mini`, `detail: low`)
-5. **Parsing JSON** avec regex (`re.search(r"\{.*\}", raw, re.DOTALL)`)
-6. **Validation** des 6 champs requis
-7. **Validation plages** (v1.1): confidence 0-100, SL 5-100 pips, TP >= 1.5x SL, risk_level dans LOW/MEDIUM/HIGH
-8. **Retour** du dictionnaire de decision ou `None`
+**Entree** :
+- Chart PNG genere par `chart_renderer.py` (Ichimoku, EMA, Bollinger, Pivots)
 
-**Decorateur tenacity** :
-
-```python
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=15))
-def analyze(...):
+**Sortie JSON** :
+```json
+{
+  "support_levels": [1.0830, 1.0800],
+  "resistance_levels": [1.0870, 1.0900],
+  "trendlines": "ligne haussiere depuis 1.0820",
+  "chart_patterns": ["triangle ascendant"],
+  "candlestick_visual": "doji sur resistance",
+  "market_phase": "trending_up",
+  "price_action_notes": "rejet de 1.0870 avec meche"
+}
 ```
 
-- 3 tentatives maximum
-- Backoff exponentiel : 2s, 4s, 8s entre les tentatives
-- Retry sur toute exception (timeout, connexion, rate limit)
+**Non-bloquant** : si l'OCR echoue, le bot continue sans (DeepSeek travaille sur les donnees structurees).
 
-**Validation stricte** (v1.1) :
+---
 
-```python
-required = ["action", "confidence", "reasoning", "stop_loss_pips", "take_profit_pips", "risk_level"]
-valid_actions = {"BUY", "SELL", "HOLD", "CLOSE"}
-if not (0 <= decision["confidence"] <= 100):      # rejete
+## `analyzer.py` - DeepSeek V4 Pro (decision)
+
+**Fichier** : `src/ai/analyzer.py`
+
+### `make_decision(...) -> dict | None`
+
+Envoie TOUTES les donnees a DeepSeek V4 Pro (contexte 1M tokens) pour la decision finale.
+
+**Entrees** :
+| Donnee | Source |
+|---|---|
+| Indicateurs (14+) | `indicators.compute_all()` - RSI, MACD, ADX, Ichimoku, Pivots, etc. |
+| OCR chart | `ocr.extract_chart_structure()` |
+| Calendrier | `calendar.fetch_events()` |
+| Positions + Compte | MT5 live |
+| Historique 20 trades | `database.get_recent_trades()` |
+| Stats performance | `database.get_statistics()` - win rate, profit total |
+| Session contexte | Asian/London/NY, jour de semaine |
+
+**Sortie** : JSON valide avec action, confidence, SL, TP, risk_level.
+
+**Modeles disponibles** :
+- `deepseek-v4-pro` : analyse approfondie avec reasoning (~60s)
+- `deepseek-v4-flash` : version rapide pour confirmation (~15s)
+
+### `make_decision_fast(...) -> dict | None`
+
+Version avec `deepseek-v4-flash`, utilisee pour les cycles de confirmation.
+
+### `_validate_decision(decision) -> bool`
+
+Validation stricte : champs requis, plages (confidence 0-100, SL 5-100 pour BUY/SELL, TP >= 1.5x SL, risk_level valide). HOLD/CLOSE acceptent SL=0.
+
+---
+
+## `strategy.py` - Risk Management + Position Management
+
+**Fichier** : `src/ai/strategy.py`
+
+### Gestion active des positions (v2.0)
+
+| Fonction | Declencheur | Action |
+|---|---|---|
+| `_apply_breakeven()` | Profit >= 1x SL initial | Deplace SL au prix d'entree |
+| `_apply_trailing_stop()` | Profit >= 2x SL initial | Trailing stop 15 pips |
+| `_check_time_exit()` | > 45 min sans progression | Ferme la position stagnante |
+| `manage_open_positions()` | Chaque debut de cycle | Applique les 3 regles ci-dessus |
+
+### Gardes pre-trade
+
+| Filtre | Seuil |
+|---|---|
+| Marche ouvert | `trade_mode == FULL` |
+| Perte jour (flottante incluse) | < 3% du capital |
+| Confiance IA | >= 70% |
+| Max positions | 1 |
+| Spread | <= 30 points |
+| Circuit breaker | 4 pertes consecutives → pause 4h |
 if not (5 <= decision["stop_loss_pips"] <= 100):   # rejete
 if decision["take_profit_pips"] < decision["stop_loss_pips"] * 1.5:  # rejete
 if decision["risk_level"] not in ("LOW", "MEDIUM", "HIGH"):           # rejete

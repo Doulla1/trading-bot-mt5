@@ -37,6 +37,11 @@
 | **ATR (Average True Range)** | Mesure de volatilite. Plus l'ATR est eleve, plus le marche est volatil |
 | **OHLCV** | Open, High, Low, Close, Volume - les 5 valeurs par bougie |
 | **Bougie / Chandelier** | Representation d'une periode (ex: 15 min) avec Open, High, Low, Close |
+| **ADX (Average Directional Index)** | Indicateur 0-100. > 25 = tendance, < 20 = range. Mesure la force de la tendance, PAS sa direction |
+| **Ichimoku Kinko Hyo** | Systeme complet: Tenkan (9), Kijun (26), Cloud (Senkou A/B), Chikou. Identifie tendance, supports, resistances |
+| **Pivot Points** | Niveaux calcules depuis le range de la bougie precedente: PP, R1-R3, S1-S3. Utilises pour les supports/resistances intraday |
+| **Pattern chandelier** | Figure formee par 1-3 bougies: doji, marteau (hammer), englobante (engulfing), etoile filante (shooting star) |
+| **Structure de marche** | Succession de highs/lows: HH+HL = tendance haussiere, LH+LL = tendance baissiere |
 
 ## Chrono-analyse (analyse temporelle)
 
@@ -60,14 +65,17 @@
 | **Previous / Forecast / Actual** | Valeur precedente, prevue, et reelle d'un indicateur |
 | **Devise** | Code ISO de la monnaie (EUR, USD, GBP, JPY, CHF, AUD, NZD, CAD) |
 
-## Architecture du bot
+## Architecture du bot v2.1
 
 | Terme | Definition |
 |---|---|
-| **GPT-4o-mini** | Modele OpenAI utilise pour l'analyse visuelle des charts. Cout reduit par rapport a GPT-4o |
-| **Base64** | Encodage du screenshot PNG pour transmission a l'API OpenAI |
-| **JSON** | Format de la decision retournee par l'IA: action, confidence, reasoning, SL, TP, risk_level |
-| **SQLite** | Base de donnees locale. Tables: `trades`, `analysis_logs` |
-| **Singleton** | Pattern de conception: une seule instance de connexion SQLite |
-| **Pydantic-settings** | Bibliotheque de configuration type-safe via `.env` |
-| **Tenacity** | Bibliotheque de retry automatique (3 tentatives pour l'API OpenAI) |
+| **GPT-4o-mini** | Modele OpenAI utilise pour l'OCR visuel du chart genere. Ne prend PAS de decision |
+| **DeepSeek V4 Pro** | Modele de decision principal. Contexte 1M tokens, recoit TOUTES les donnees + historique + memoire |
+| **OCR (Optical Character Recognition)** | Ici: extraction de la structure visuelle du chart (niveaux S/R, patterns, phase) |
+| **Chart genere** | Graphique cree par `chart_renderer.py` via mplfinance: Ichimoku, EMA, Bollinger, Pivots |
+| **Base64** | Encodage de l'image pour transmission aux API IA |
+| **JSON** | Format de la decision: action, confidence, reasoning, SL, TP, risk_level |
+| **SQLite** | Base de donnees locale. Tables: `trades`, `analysis_logs`, `bot_state`, `calendar_cache` |
+| **Breakeven** | Deplacement du SL au prix d'entree quand le profit atteint 1x le SL initial |
+| **Trailing Stop** | SL qui suit le prix a distance fixe quand le profit atteint 2x le SL initial |
+| **Time Exit** | Fermeture automatique si la position stagne depuis plus de 45 minutes |

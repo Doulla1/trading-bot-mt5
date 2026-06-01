@@ -6,22 +6,24 @@ La gestion des risques est le coeur du bot. Elle est implantee dans `src/ai/stra
 
 ```mermaid
 flowchart TD
-    A[Decision IA] --> B{Marche ouvert ?}
+    A[Decision DeepSeek] --> B{Marche ouvert ?}
     B -- Non --> C[Cycle annule]
-    B -- Oui --> D{Perte jour < 3% ?}
+    B -- Oui --> D{Perte jour flottante < 3% ?}
     D -- Non --> E[Trade bloque]
-    D -- Oui --> F{Action CLOSE ?}
-    F -- Oui --> G[Fermer toutes les positions]
-    F -- Non --> H{Action BUY/SELL ?}
-    H -- Non --> I[HOLD - pas d'action]
-    H -- Oui --> J{Confiance >= 70% ?}
-    J -- Non --> K[Trade ignore]
-    J -- Oui --> L{Max positions < 1 ?}
+    D -- Oui --> F{Circuit breaker actif ?}
+    F -- Oui --> G[Trade bloque - pause 4h]
+    F -- Non --> H{Action CLOSE ?}
+    H -- Oui --> I[Fermer toutes les positions]
+    H -- Non --> J{Action BUY/SELL ?}
+    J -- Non --> K[HOLD - pas d'action]
+    J -- Oui --> L{Spread <= 30 ?}
     L -- Non --> M[Trade ignore]
-    L -- Oui --> N[Executer ordre]
-    N --> O[SL obligatoire]
-    O --> P[TP >= 1.5x SL]
-    P --> Q[Volume calcule: max 1% risque]
+    L -- Oui --> N{Confiance >= 70% ?}
+    N -- Non --> O[Trade ignore]
+    N -- Oui --> P{Max positions < 1 ?}
+    P -- Non --> Q[Trade ignore]
+    P -- Oui --> R[Executer ordre + SL/TP]
+    R --> S[Gestion active: Breakeven, Trailing, Time Exit]
 ```
 
 ### 1. Marche ouvert

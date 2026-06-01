@@ -11,18 +11,23 @@ flowchart TD
     run[run.py] --> run_forever
     run --> run_once
     run_forever -->|APScheduler toutes les N min| run_once
-    run_once --> reconcile[reconcile_closed_positions]
+    run_once --> manage[manage_open_positions - Breakeven/Trailing/TimeExit]
+    manage --> reconcile[reconcile_closed_positions]
     reconcile --> bridge_connect[bridge.connect()]
     bridge_connect --> is_open{is_market_open?}
     is_open -->|Non| return[Retour]
-    is_open -->|Oui| capture[screenshots.capture_chart]
-    capture --> rates[bridge.get_rates]
-    rates --> indicators[indicators.compute_all]
-    indicators --> calendar[calendar.fetch_events]
+    is_open -->|Oui| rates_m15[bridge.get_rates M15]
+    rates_m15 --> rates_h1[bridge.get_rates H1]
+    rates_h1 --> indicators[indicators.compute_all M15+H1]
+    indicators --> chart[chart_renderer.render - Ichimoku/EMA/BB]
+    chart --> calendar[calendar.fetch_events]
     calendar --> news{News HIGH impact ?}
     news -->|Oui| return
-    news -->|Non| ai[ai_vision.analyze]
-    ai --> strategy[strategy.execute_decision]
+    news -->|Non| ocr[ocr.extract_chart_structure - GPT-4o-mini]
+    ocr --> session[_get_session_context - Asian/London/NY]
+    session --> history[get_recent_trades + get_statistics]
+    history --> deepseek[analyzer.make_decision - DeepSeek V4 Pro]
+    deepseek --> strategy[strategy.execute_decision]
     strategy --> log[database.log_analysis]
     log --> disconnect[bridge.disconnect]
     disconnect --> cleanup[screenshots.cleanup_old_screenshots]
@@ -32,22 +37,26 @@ flowchart TD
 
 ### `run_once() -> None`
 
-Execute un cycle complet d'analyse et de trading.
+Execute un cycle complet d'analyse et de trading (v2.1).
 
 **Etapes** :
 
-1. **Reconciliation** - `reconcile_closed_positions(sym)` (v1.1)
-2. **Connexion MT5** - `bridge.connect()`
-3. **Verification marche** - `bridge.is_market_open()`
-4. **Capture screenshot** - `screenshots.capture_chart(sym)`
-5. **Calcul indicateurs** - `bridge.get_rates()` + `indicators.compute_all()`
-6. **Scraping calendrier** - `calendar.fetch_events()` + `filter_relevant_events()`
-7. **Blocage news HIGH** - `_has_high_impact_news_soon()` (v1.1)
-8. **Positions et compte** - `executor.get_open_positions()` + `bridge.get_account_info()`
-9. **Analyse IA** - `vision.analyze(...)` (si cle API presente et screenshot reussi)
-10. **Execution strategique** - `strategy.execute_decision(decision)` + `database.log_trade_open(...)` avec flag `was_executed` corrige APRES execution
-11. **Log de l'analyse** - `database.log_analysis(...)` avec `was_executed` reel
-12. **Deconnexion et nettoyage** - `bridge.disconnect()` + `screenshots.cleanup_old_screenshots(48h)`
+1. **Gestion active positions** - `manage_open_positions()` : breakeven, trailing stop, time exit
+2. **Reconciliation** - `reconcile_closed_positions(sym)` : detection fermetures SL/TP
+3. **Connexion MT5** - `bridge.connect()`
+4. **Verification marche** - `bridge.is_market_open()`
+5. **Indicateurs multi-TF** - `bridge.get_rates(M15, 200)` + `bridge.get_rates(H1, 100)` + `indicators.compute_all()`
+6. **Chart genere** - `chart_renderer.render_analysis_chart()` : chart pro avec Ichimoku, EMA, Bollinger, Pivots
+7. **Screenshot debug** - `screenshots.capture_chart(sym)`
+8. **Calendrier** - `calendar.fetch_events()` + `filter_relevant_events()` + cache 4h
+9. **Blocage news HIGH** - `_has_high_impact_news_soon()`
+10. **Contexte session** - `_get_session_context()` : Asian/London/NY, jour de semaine
+11. **Positions + Compte + Historique** - `executor.get_open_positions()` + `bridge.get_account_info()` + `get_recent_trades(20)` + `get_statistics()`
+12. **OCR chart** - `ocr.extract_chart_structure(chart_path)` : GPT-4o-mini extrait phases, niveaux, patterns
+13. **Decision DeepSeek** - `analyzer.make_decision(...)` : DeepSeek V4 Pro avec tout le contexte (1M tokens)
+14. **Execution** - `strategy.execute_decision(decision)` + `database.log_trade_open()`
+15. **Log** - `database.log_analysis()` avec `was_executed` reel
+16. **Deconnexion** - `bridge.disconnect()` + `screenshots.cleanup_old_screenshots(48h)`
 
 **Gestion d'erreurs** :
 

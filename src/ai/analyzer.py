@@ -146,14 +146,16 @@ def _validate_decision(decision: dict) -> bool:
         return False
 
     sl = decision["stop_loss_pips"]
-    if not (5 <= sl <= 100):
-        logger.error(f"SL pips invalide: {sl}")
-        return False
-
     tp = decision["take_profit_pips"]
-    if tp < sl * 1.5:
-        logger.error(f"TP {tp} < 1.5x SL {sl}")
-        return False
+
+    # HOLD/CLOSE peuvent avoir SL=0, TP=0
+    if decision["action"] in ("BUY", "SELL"):
+        if not (5 <= sl <= 100):
+            logger.error(f"SL pips invalide pour BUY/SELL: {sl}")
+            return False
+        if tp < sl * 1.5:
+            logger.error(f"TP {tp} < 1.5x SL {sl}")
+            return False
 
     if decision["risk_level"] not in ("LOW", "MEDIUM", "HIGH"):
         logger.error(f"Risk level invalide: {decision.get('risk_level')}")

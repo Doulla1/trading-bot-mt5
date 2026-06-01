@@ -7,8 +7,11 @@ Le bot est configure via un fichier `.env` a la racine du projet. Les parametres
 Creez un fichier `.env` a la racine du projet en copiant l'exemple ci-dessous :
 
 ```env
-# === OpenAI ===
+# === OpenAI (OCR) ===
 OPENAI_API_KEY=sk-votre-cle-api-openai
+
+# === DeepSeek (Decision) ===
+DEEPSEEK_API_KEY=sk-votre-cle-deepseek
 
 # === MetaTrader 5 ===
 MT5_LOGIN=12345678
@@ -37,11 +40,17 @@ LOG_FILE=logs/trading-bot.log
 
 ## Variables detaillees
 
-### OpenAI
+### OpenAI (OCR du chart)
 
 | Variable | Type | Defaut | Description |
 |---|---|---|---|
-| `OPENAI_API_KEY` | `str` | `""` | Cle API OpenAI. Obligatoire pour l'analyse IA. Obtenable sur [platform.openai.com](https://platform.openai.com/api-keys) |
+| `OPENAI_API_KEY` | `str` | `""` | Cle API OpenAI pour GPT-4o-mini (OCR visuel). Obtenable sur [platform.openai.com](https://platform.openai.com/api-keys) |
+
+### DeepSeek (Decision IA)
+
+| Variable | Type | Defaut | Description |
+|---|---|---|---|
+| `DEEPSEEK_API_KEY` | `str` | `""` | Cle API DeepSeek pour V4 Pro (decision). Obtenable sur [platform.deepseek.com](https://platform.deepseek.com/api_keys) |
 
 ### MetaTrader 5
 

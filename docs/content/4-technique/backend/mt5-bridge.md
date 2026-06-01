@@ -1,16 +1,17 @@
-# Module MT5 : bridge.py, executor.py, indicators.py, screenshots.py
+# Module MT5 v2.1 : bridge, executor, indicators, chart_renderer, screenshots
 
 ## Vue d'ensemble
 
-Le module `src/mt5/` est l'interface entre le bot et MetaTrader 5. Il est divise en 4 fichiers specialises.
+Le module `src/mt5/` est l'interface entre le bot et MetaTrader 5. 5 fichiers specialises.
 
 ```
 src/mt5/
   __init__.py
-  bridge.py         # Connexion, donnees, infos compte
-  executor.py       # Ordres de trading
-  indicators.py     # Calculs indicateurs techniques
-  screenshots.py    # Capture d'ecran
+  bridge.py          # Connexion, donnees, infos compte
+  executor.py        # Ordres de trading + modification SL
+  indicators.py      # v2.0: ADX, Ichimoku, Pivots, Patterns, Structure
+  chart_renderer.py  # v2.1: Generation chart pro (mplfinance)
+  screenshots.py     # Capture d'ecran debug (mss)
 ```
 
 ## `bridge.py` - Connexion et donnees MT5
@@ -219,3 +220,26 @@ with mss.mss() as sct:
 ### `cleanup_old_screenshots(max_age_hours=24) -> int`
 
 Supprime les screenshots plus vieux que `max_age_hours` heures. Appele automatiquement a la fin de chaque cycle d'analyse.
+
+---
+
+## `chart_renderer.py` - Generation de charts professionnels (v2.1)
+
+**Fichier** : `src/mt5/chart_renderer.py`
+
+### `render_analysis_chart(df_m15, indicators, symbol) -> Path | None`
+
+Genere un chart professionnel a partir des donnees OHLCV, avec TOUS les indicateurs dessines directement. Ne necessite PAS que MT5 soit visible.
+
+**Indicateurs dessines sur le chart** :
+- Chandeliers (100 dernieres bougies)
+- Ichimoku Kinko Hyo (Tenkan, Kijun, Cloud vert/rouge)
+- EMA 20 (orange) + EMA 200 (violet)
+- Bandes de Bollinger (bleu clair)
+- Points Pivots (lignes pointillees jaunes)
+- Volume en bas
+- Titre avec symbole, prix, regime, structure
+
+**Technologie** : [mplfinance](https://github.com/matplotlib/mplfinance) (wrapper matplotlib pour charts financiers).
+
+**Pourquoi ?** Avant v2.0, le bot capturait l'ecran entier avec `mss`, et GPT-4o-mini ne voyait pas toujours le chart. Maintenant le chart est genere automatiquement avec tous les indicateurs, garantissant une analyse OCR fiable.
