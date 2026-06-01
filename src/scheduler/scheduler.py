@@ -50,11 +50,39 @@ def reconcile_closed_positions(sym: str) -> int:
 
 
 def _has_high_impact_news_soon(events: list, _minutes_buffer: int = 30) -> bool:
-    """Verifie si une news HIGH impact approche (MED-06)."""
+    """Verifie si une news HIGH impact approche dans les N prochaines minutes (v2.1).
+    Utilise les heures UTC du fallback calendrier quand dispo."""
     try:
+        now = datetime.now()
         for ev in events:
-            if ev.get("impact") == "high":
-                return True  # Simplifie: bloquer si HIGH impact dans les 24h
+            if ev.get("impact") != "high":
+                continue
+            # Tenter de parser l'heure de l'evenement
+            event_time_str = ev.get("time", "")
+            if not event_time_str or event_time_str == "All day":
+                # Evenement 'All day' ou sans heure precise: on le signale mais pas de blocage
+                logger.debug(f"News HIGH sans heure precise: {ev.get('event')}")
+                continue
+            try:
+                # Format attendu: "HH:MM" (UTC dans le fallback)
+                parts = event_time_str.split(":")
+                event_hour = int(parts[0])
+                event_minute = int(parts[1]) if len(parts) > 1 else 0
+                # On verifie si l'evenement est aujourd'hui (la date est dans le dict)
+                ev_date = ev.get("date", now.strftime("%Y-%m-%d"))
+                if ev_date != now.strftime("%Y-%m-%d"):
+                    continue
+                event_dt = now.replace(hour=event_hour, minute=event_minute, second=0, microsecond=0)
+                minutes_until = (event_dt - now).total_seconds() / 60
+                if 0 < minutes_until <= _minutes_buffer:
+                    logger.info(f"News HIGH dans {minutes_until:.0f} min: {ev.get('event')} - pas d'execution")
+                    return True
+                elif -5 < minutes_until <= 0:
+                    # News en cours ou vient de passer (<5 min)
+                    logger.info(f"News HIGH en cours/recente: {ev.get('event')} - pas d'execution")
+                    return True
+            except (ValueError, TypeError):
+                continue
         return False
     except Exception:
         return False

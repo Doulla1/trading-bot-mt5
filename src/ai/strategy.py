@@ -45,6 +45,25 @@ def execute_decision(decision: dict) -> StrategyResult:
     # BUY / SELL
     if action in ("BUY", "SELL"):
         sym = settings.trading_symbol
+        open_positions = get_open_positions(sym)
+
+        # Si position deja ouverte dans la direction opposee
+        if open_positions:
+            existing_pos = open_positions[0]
+            existing_dir = "BUY" if existing_pos.get("type") == mt5.POSITION_TYPE_BUY else "SELL"
+            if existing_dir != action:
+                # Signaux opposes: fermer la position, NE PAS inverser immediatement
+                # Le prochain cycle decidera si une nouvelle position est justifiee
+                logger.info(f"Fermeture {existing_dir} (signaux opposes), pas de reversal immediat")
+                close_res = close_position(existing_pos["ticket"])
+                result.closed_positions.append(close_res)
+                return result
+            else:
+                # Meme direction: on garde la position, le trailing/breakeven s'en occupe
+                logger.info(f"Deja {existing_dir} - position conservee, gestion active en cours")
+                return result
+
+        # Aucune position: filtrer et ouvrir si OK
         if not _passes_trade_filters(decision, symbol_info):
             return result
         # ... reste du code existant ...

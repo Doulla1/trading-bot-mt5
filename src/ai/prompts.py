@@ -113,11 +113,18 @@ Analyse TOUTES les donnees (technique, Ichimoku, pivots, OCR du chart, patterns,
 
 Regles:
 - CONFIDENCE elevee (>70) uniquement si TOUS les signaux convergent
+- Si une news HIGH impact approche (<30 min) -> HOLD systematique
 - Si Ichimoku, pivots et structure sont en conflit -> HOLD
 - Si ADX < 20 (ranging) -> eviter de trader, preference HOLD
+- Eviter d'ouvrir une position juste avant une news HIGH (le bot bloque deja, mais sois prudent)
 - SL entre 15 et 50 pips selon ATR et volatilite
 - TP >= 1.5x le stop loss
-- CLOSE uniquement si une position est ouverte ET doit etre fermee
+
+POSITIONS EXISTANTES (regle conservative):
+- Si tu as deja une position et que les signaux confirment ta direction -> HOLD (la position est bonne, le trailing/breakeven s'en occupe)
+- Si tu as deja une position et que les signaux s'inversent clairement (retournement de tendance) -> CLOSE (le bot fermera et attendra le prochain cycle pour reevaluer)
+- Si tu as deja une position et que les signaux sont mixtes -> HOLD (attendre confirmation)
+- NE SUGGERE PAS BUY/SELL si une position est deja ouverte (le bot n'ouvrira pas de deuxieme position)
 
 Reponds UNIQUEMENT en JSON:
 {{"action": "BUY|SELL|HOLD|CLOSE", "confidence": 0-100, "reasoning": "analyse concise (max 200 mots)", "stop_loss_pips": int, "take_profit_pips": int, "risk_level": "LOW|MEDIUM|HIGH"}}""")
@@ -226,12 +233,13 @@ def _format_calendar(events: list) -> str:
     if not events:
         return "Aucun evenement majeur prevu."
     lines = []
-    for ev in events[:10]:
+    for ev in events[:15]:
         impact = "HIGH" if ev.get("impact") == "high" else "MED" if ev.get("impact") == "medium" else "LOW"
+        date_info = ev.get("date", "")
+        time_info = ev.get("time", "")
         lines.append(
-            f"- [{impact}] {ev.get('time', '')} | {ev.get('currency', '')} | "
-            f"{ev.get('event', '')} | Prev: {ev.get('previous', 'N/A')} | "
-            f"Forecast: {ev.get('forecast', 'N/A')}"
+            f"- [{impact}] {date_info} {time_info} | {ev.get('currency', '')} | "
+            f"{ev.get('event', '')}"
         )
     return "\n".join(lines)
 
