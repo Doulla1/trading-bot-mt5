@@ -31,6 +31,14 @@ def connect() -> bool:
         logger.error(f"Echec connexion MT5 : {error}")
         return False
     logger.info(f"MT5 connecte - Compte {settings.mt5_login} sur {settings.mt5_server}")
+
+    # Verifier que le trading est autorise sur le compte
+    account = mt5.account_info()
+    if account is not None and not account.trade_allowed:
+        logger.warning("Trading desactive sur ce compte MT5 (trade_allowed=False). Verifiez les parametres du compte.")
+    else:
+        logger.info("Trading autorise sur le compte")
+
     return True
 
 

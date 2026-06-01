@@ -159,6 +159,38 @@ Le dernier message avant le plantage contient generalement la cause.
 
 ---
 
+## Probleme : Erreur 10027 - AutoTrading disabled by client
+
+**Symptome** : `Code retour: 10027 - AutoTrading disabled by client` dans les logs.
+
+**Cause** : Le trading algorithmique n'est pas active dans le terminal MT5. C'est un parametre de securite qui empeche tout ordre passe par l'API Python.
+
+**Solutions** :
+
+1. **Activer dans les options MT5** :
+   - Menu `Outils` → `Options` (ou `Ctrl+O`)
+   - Onglet `Expert Advisors`
+   - Cocher la case **"Allow Algo Trading"**
+   - Decocher eventuellement "Disable Algo Trading when the account is changed" si vous changez de compte
+   - Cliquer `OK`
+
+2. **Verifier le bouton Algo Trading** dans la barre d'outils :
+   - Le bouton (icone de lecture/play) doit etre **vert** et enfonce
+   - Si le bouton est rouge, cliquer dessus pour l'activer
+   - S'il n'est pas visible : clic droit sur la barre d'outils → `Customize` → ajouter le raccourci `Algo Trading`
+
+3. **Verifier les proprietes du symbole** (certains brokers desactivent l'algo trading sur certains symboles) :
+   ```powershell
+   python -c "import MetaTrader5 as mt5; mt5.initialize(); print(mt5.symbol_info('EURUSD').trade_mode); mt5.shutdown()"
+   ```
+   - `0` = trading autorise
+   - `1` = pas de trading (close only)
+   - `2` = trading desactive
+
+> **Note** : Ce parametre doit etre active **une seule fois**. Il persiste au redemarrage. Si vous changez de compte MT5 (demo → reel), verifiez-le a nouveau.
+
+---
+
 ## Probleme : Positions ouvertes non detectees
 
 **Symptome** : Le bot ouvre une position alors qu'une est deja ouverte.

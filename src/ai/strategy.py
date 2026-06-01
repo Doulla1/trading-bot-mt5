@@ -47,6 +47,7 @@ def execute_decision(decision: dict) -> StrategyResult:
         sym = settings.trading_symbol
         if not _passes_trade_filters(decision, symbol_info):
             return result
+        # ... reste du code existant ...
 
         stop_loss_pips = decision["stop_loss_pips"]
         take_profit_pips = decision["take_profit_pips"]
@@ -191,3 +192,123 @@ def _circuit_breaker_active() -> bool:
         return datetime.now() < until
     except Exception:
         return False
+
+
+# ============================================================
+# Gestion des positions (breakeven, trailing stop, time exit) v2.0
+# ============================================================
+
+def manage_open_positions() -> int:
+    """Applique breakeven, trailing stop, time exit aux positions ouvertes.
+    Appele au debut de chaque cycle. Retourne le nombre de modifications."""
+    sym = settings.trading_symbol
+    modifications = 0
+    for pos in get_open_positions(sym):
+        if _apply_breakeven(pos):
+            modifications += 1
+        elif _apply_trailing_stop(pos):
+            modifications += 1
+        if _check_time_exit(pos):
+            close_position(pos["ticket"], sym)
+            modifications += 1
+    return modifications
+
+
+def _apply_breakeven(pos: dict) -> bool:
+    """Deplace le SL au prix d'entree quand le profit >= 1x SL initial."""
+    entry_price = pos.get("price_open", 0)
+    current_sl = pos.get("sl", 0)
+    ticket = pos.get("ticket", 0)
+    tick = mt5.symbol_info_tick(settings.trading_symbol)
+
+    if tick is None or entry_price == 0:
+        return False
+
+    if pos.get("type") == mt5.POSITION_TYPE_BUY:
+        sl_distance_pips = (entry_price - current_sl) / (10 * mt5.symbol_info(settings.trading_symbol).point) if current_sl else 0
+        profit_distance_pips = (tick.bid - entry_price) / (10 * mt5.symbol_info(settings.trading_symbol).point)
+        if profit_distance_pips >= sl_distance_pips and current_sl < entry_price:
+            _modify_sl(ticket, entry_price)
+            logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a l'entree {entry_price}")
+            return True
+    else:
+        sl_distance_pips = (current_sl - entry_price) / (10 * mt5.symbol_info(settings.trading_symbol).point) if current_sl else 0
+        profit_distance_pips = (entry_price - tick.ask) / (10 * mt5.symbol_info(settings.trading_symbol).point)
+        if profit_distance_pips >= sl_distance_pips and current_sl > entry_price:
+            _modify_sl(ticket, entry_price)
+            logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a l'entree {entry_price}")
+            return True
+    return False
+
+
+def _apply_trailing_stop(pos: dict) -> bool:
+    """Trailing stop: deplace le SL quand le profit >= 2x le SL initial."""
+    entry_price = pos.get("price_open", 0)
+    current_sl = pos.get("sl", 0)
+    ticket = pos.get("ticket", 0)
+    tick = mt5.symbol_info_tick(settings.trading_symbol)
+    sym_info = mt5.symbol_info(settings.trading_symbol)
+
+    if tick is None or sym_info is None or entry_price == 0:
+        return False
+
+    trail_distance_pips = 15  # distance de trailing en pips
+    trail_distance = trail_distance_pips * 10 * sym_info.point
+    sl_distance_pips = abs(entry_price - current_sl) / (10 * sym_info.point) if current_sl else 0
+
+    if pos.get("type") == mt5.POSITION_TYPE_BUY:
+        profit_distance_pips = (tick.bid - entry_price) / (10 * sym_info.point)
+        if profit_distance_pips >= sl_distance_pips * 2:
+            new_sl = tick.bid - trail_distance
+            new_sl = round(new_sl, sym_info.digits)
+            if new_sl > current_sl + sym_info.point:
+                _modify_sl(ticket, new_sl)
+                logger.info(f"TRAILING: ticket {ticket}, SL deplace a {new_sl}")
+                return True
+    else:
+        profit_distance_pips = (entry_price - tick.ask) / (10 * sym_info.point)
+        if profit_distance_pips >= sl_distance_pips * 2:
+            new_sl = tick.ask + trail_distance
+            new_sl = round(new_sl, sym_info.digits)
+            if new_sl < current_sl - sym_info.point:
+                _modify_sl(ticket, new_sl)
+                logger.info(f"TRAILING: ticket {ticket}, SL deplace a {new_sl}")
+                return True
+    return False
+
+
+def _check_time_exit(pos: dict) -> bool:
+    """Ferme la position si elle stagne depuis 3+ cycles (45 min M15)."""
+    try:
+        db = get_db()
+        ticket = pos.get("ticket", 0)
+        row = db.execute(
+            "SELECT opened_at FROM trades WHERE ticket = ?", [ticket]
+        ).fetchone()
+        if row is None:
+            return False
+        from datetime import datetime as dt, timedelta
+        opened = dt.fromisoformat(row[0])
+        # 3 cycles M15 = 45 minutes
+        if dt.now() - opened > timedelta(minutes=45):
+            pnl = pos.get("profit", 0)
+            if abs(pnl) < 1.0:  # Stagne (moins de 1 EUR de P&L)
+                logger.info(f"TIME EXIT: ticket {ticket}, stagne depuis >45 min, P&L={pnl:.2f}")
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _modify_sl(ticket: int, new_sl: float) -> None:
+    """Modifie le SL d'une position ouverte."""
+    sym = settings.trading_symbol
+    request = {
+        "action": mt5.TRADE_ACTION_SLTP,
+        "symbol": sym,
+        "position": ticket,
+        "sl": new_sl,
+    }
+    result = mt5.order_send(request)
+    if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+        logger.warning(f"Echec modification SL ticket {ticket}: {result.comment if result else 'None'}")

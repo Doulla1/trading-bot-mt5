@@ -70,6 +70,8 @@ def open_position(direction, volume, stop_loss, take_profit, symbol=None, commen
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
         error_msg = f"Code retour: {result.retcode if result else 'None'} - {result.comment if result else 'None'}"
         logger.error(f"Echec ouverture position {direction} {sym}: {error_msg}")
+        if result and result.retcode == 10027:
+            logger.warning("ASTUCE : Activez l'Algo Trading dans MT5 : Outils > Options > Expert Advisors > Allow Algo Trading")
         return TradeResult(False, None, volume, price, stop_loss, take_profit, comment, error_msg)
 
     logger.info(f"POSITION OUVERTE: {direction} {sym} | Volume: {volume} | Prix: {price} | SL: {stop_loss} | TP: {take_profit} | Ticket: {result.order}")

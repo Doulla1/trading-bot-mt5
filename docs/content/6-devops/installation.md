@@ -18,7 +18,11 @@
 4. Verifier que le graphique EURUSD s'affiche correctement
 5. (Optionnel) Ajouter d'autres paires de devises dans MarketWatch
 
-> **Important** : Le bot utilise l'API Python de MT5. Aucune configuration speciale n'est requise dans MT5 lui-meme. Le terminal doit etre **lance** (pas besoin qu'il soit au premier plan).
+> **Important** : Le bot utilise l'API Python de MT5. **Vous devez activer le trading algorithmique dans MT5** :
+> 1. Menu `Outils` → `Options` → Onglet `Expert Advisors` → Cocher **"Allow Algo Trading"**
+> 2. Verifier que le bouton **Algo Trading** dans la barre d'outils est vert
+> 
+> Le terminal doit etre **lance** (pas besoin qu'il soit au premier plan).
 
 ## Etape 2 : Installer Python 3.11+
 

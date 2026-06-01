@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: str = ""
+    deepseek_api_key: str = ""
     mt5_login: int = 0
     mt5_password: str = ""
     mt5_server: str = "FusionMarkets-Demo"

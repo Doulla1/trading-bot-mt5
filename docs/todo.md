@@ -61,10 +61,26 @@
 
 ---
 
-# Todo - Support multi-instances (--symbol)
+# Todo - Architecture v2: DeepSeek V4 Pro + Position Management + Multi-TF
 
-**Debut** : 2026-06-01 18:37
-**Fin** : 2026-06-01 18:38
+**Debut** : 2026-06-01 20:10
+**Fin** : 2026-06-01 20:19
+
+## Taches
+
+- [x] Enrichir indicateurs (ADX, Ichimoku, Pivots, patterns, structure marche)
+- [x] Creer src/ai/ocr.py (GPT-4o-mini → extraction visuelle chart)
+- [x] Creer src/ai/analyzer.py (DeepSeek V4 Pro → decision avec contexte 1M)
+- [x] Mettre a jour prompts.py (prompts separes OCR + Decision)
+- [x] Ajouter gestion positions (breakeven, trailing stop, time exit)
+- [x] Mettre a jour scheduler.py (pipeline multi-TF + OCR + Analyzer)
+- [x] Mettre a jour les tests
+- [ ] Mettre a jour la documentation
+
+---
+- [ ] Tester cycle complet
+
+---
 
 ## Taches
 
