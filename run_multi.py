@@ -110,8 +110,12 @@ def _has_high_impact_news_soon(events: list) -> bool:
         return False
 
 
-def run_symbol(cfg: dict) -> None:
-    """Execute un cycle complet pour un symbole."""
+def run_symbol(cfg: dict, all_events: list | None = None) -> None:
+    """Execute un cycle complet pour un symbole.
+    Args:
+        cfg: Configuration du symbole.
+        all_events: Evenements calendrier deja recuperes pour ce round (optionnel).
+                     Si None, fetch_events() est appele une fois en interne (fallback)."""
     sym = cfg["symbol"]
     tf = cfg["timeframe"]
     magic = cfg["magic"]
@@ -163,8 +167,9 @@ def run_symbol(cfg: dict) -> None:
     # Chart genere
     chart_path = chart_renderer.render_analysis_chart(df_m15, ind_data, sym)
 
-    # Calendrier
-    all_events = fetch_events()
+    # Calendrier (passe en parametre depuis run_all pour eviter N appels/round)
+    if all_events is None:
+        all_events = fetch_events()
     relevant = filter_relevant_events(all_events, sym)
 
     if _has_high_impact_news_soon(relevant):
@@ -224,9 +229,12 @@ def run_all() -> None:
                 continue
 
             try:
+                # Calendrier: un seul appel pour tout le round (couteux via Playwright)
+                all_events = fetch_events()
+
                 for cfg in SYMBOLS:
                     if _should_run(cfg, round_num):
-                        run_symbol(cfg)
+                        run_symbol(cfg, all_events)
                     else:
                         logger.debug(f"[{cfg['symbol']}] Saute (periodicite {cfg['interval_min']}min)")
             finally:
