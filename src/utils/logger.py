@@ -22,6 +22,8 @@ def setup_logger() -> None:
         rotation="00:00",
         retention="15 days",
         encoding="utf-8",
+        delay=True,
+        catch=True,
     )
     logger.info("Logger initialise")
 
