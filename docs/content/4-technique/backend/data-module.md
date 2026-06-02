@@ -1,33 +1,46 @@
-# Module Data : calendar.py, database.py, models.py
+# Module Data : calendar.py, investing_calendar.py, database.py, models.py
 
 ## Vue d'ensemble
 
-Le module `src/data/` gere les donnees du bot : scraping du calendrier economique, persistance SQLite et modeles de donnees.
+Le module `src/data/` gere les donnees du bot : scraping du calendrier economique (cascade multi-sources), persistance SQLite et modeles de donnees.
 
 ```
 src/data/
   __init__.py
-  calendar.py     # Scraping ForexFactory
-  database.py     # SQLite singleton + CRUD
-  models.py       # Dataclasses
+  calendar.py              # Orquestrateur calendrier (cascade multi-sources)
+  investing_calendar.py    # Scrapeur Investing.com (Playwright)
+  database.py              # SQLite singleton + CRUD
+  models.py                # Dataclasses
 ```
 
-## `calendar.py` - Calendrier economique (v1.1)
+## `calendar.py` - Orquestrateur calendrier economique (v3.0)
 
 **Fichier** : `src/data/calendar.py`
 
+### Strategie de cascade
+
+Le calendrier utilise une cascade a 4 niveaux pour garantir la disponibilite des donnees :
+
+```
+Cache SQLite (TTL 4h)
+    -> Investing.com (Playwright, Chromium headless)
+        -> ForexFactory (httpx + BeautifulSoup)
+            -> Evenements statiques (fallback ultime)
+```
+
+Chaque niveau sert de filet de securite au precedent. En cas d'echec, le niveau suivant est tente automatiquement.
+
 ### `fetch_events() -> list[dict]`
 
-Recupere les evenements economiques depuis ForexFactory avec cache SQLite (TTL 4h).
+Recupere les evenements economiques en suivant la cascade.
 
 **Algorithme** :
 
-1. **Cache** : tente de charger depuis `calendar_cache` (valide 4h)
-2. **Si cache manquant** : requete HTTP GET sur `https://www.forexfactory.com/calendar`
-3. **Parsing HTML** avec `BeautifulSoup(lxml)`
-4. **Pour chaque ligne** `calendar__row` : extraction impact (via `_parse_impact()`), devise, nom, heure
-5. **Sauvegarde** dans le cache SQLite
-6. **Retour** de la liste des evenements
+1. **Cache** : tente de charger depuis `calendar_cache` (TTL 4h). Si les donnees sont encore fraiches, retourne immediatement.
+2. **Investing.com** : appel a `fetch_events_investing()` via Playwright. Si reussi, sauvegarde dans le cache et retourne.
+3. **ForexFactory** : requete HTTP GET sur `https://www.forexfactory.com/calendar` + parsing BeautifulSoup. Si reussi, sauvegarde dans le cache et retourne.
+4. **Statique** : generation d'evenements macroeconomiques majeurs recurrents a partir d'une base interne.
+5. Si tout echoue, retourne une liste vide.
 
 **Fonctions internes** :
 
@@ -35,11 +48,13 @@ Recupere les evenements economiques depuis ForexFactory avec cache SQLite (TTL 4
 |---|---|
 | `_load_from_cache(date, now)` | Charge les evenements depuis `calendar_cache` si TTL valide |
 | `_save_to_cache(date, events, now)` | Persiste les evenements dans `calendar_cache` |
+| `_try_investing()` | Tente le scraping Investing.com via `investing_calendar.py`. Retourne vide si Playwright indisponible |
 | `_scrape_forexfactory()` | Telecharge et parse la page ForexFactory |
-| `_parse_calendar_row(row)` | Extrait un evenement d'une ligne HTML |
+| `_parse_calendar_row(row)` | Extrait un evenement d'une ligne HTML ForexFactory |
 | `_parse_impact(row)` | Determine l'impact (high/medium/low) via les classes CSS |
+| `_get_static_events()` | Genere les evenements macroeconomiques recurrents (fallback ultime) |
 
-**Headers HTTP** :
+**Headers HTTP (ForexFactory)** :
 
 ```python
 headers = {
@@ -49,23 +64,123 @@ headers = {
 }
 ```
 
-**Timeout** : 15 secondes. En cas d'echec, retourne une liste vide (fallback).
+**Timeout** : 15 secondes pour ForexFactory, 30 secondes pour Investing.com (navigation + attente selecteur).
 
 ### `filter_relevant_events(events, symbol="EURUSD") -> list[dict]`
 
 Filtre les evenements par devise du symbole de trading.
 
 ```python
-currencies = [symbol[:3], symbol[3:]]  # EUR, USD
+currencies = {symbol[:3], symbol[3:]}  # EUR, USD
 return [ev for ev in events if ev.get("impact") in ("high", "medium") and ev.get("currency") in currencies]
 ```
 
 - Ne conserve que les evenements HIGH et MEDIUM
 - Filtre par devise (ex: EURUSD conserve les evenements EUR et USD)
 
-### `_fallback_events() -> list`
+### Cache SQLite
 
-Retourne une liste vide quand le scraping echoue. Le bot continue sans donnees calendaires.
+- Table : `calendar_cache(date TEXT PK, events_json TEXT, fetched_at TEXT)`
+- TTL : 4 heures
+- Inseresion : `INSERT OR REPLACE`
+- Le cache est persiste entre les redemarrages du bot
+
+---
+
+## `investing_calendar.py` - Scrapeur Investing.com (v1.0)
+
+**Fichier** : `src/data/investing_calendar.py`
+
+### Description
+
+Scrapeur specialise pour le calendrier economique d'Investing.com (version française). Utilise **Playwright** avec un navigateur Chromium headless pour contourner le rendu JavaScript cote client (Next.js).
+
+### `fetch_events_investing() -> list[dict]`
+
+Point d'entree unique du module. Gere les tentatives avec retry (3 max, delai 3s).
+
+**Retourne** un dictionnaire par evenement :
+
+```python
+{
+    "time": "08:30",       # Heure fixe ou temps restant: "57m"
+    "currency": "USD",     # Devise mappee depuis le code pays
+    "event": "Non-Farm Payrolls",
+    "impact": "high",      # "high" | "medium" | "low"
+    "actual": "243K",
+    "forecast": "185K",
+    "previous": "228K",
+}
+```
+
+**Si Playwright n'est pas installe** : retourne une liste vide sans planter (import tardif).
+
+### Techniques anti-detection
+
+Investing.com detecte et bloque les bots. Le module implemente plusieurs contre-mesures :
+
+| Technique | Implementation |
+|---|---|
+| **User-agent** | Chrome 125 Windows (spoofing) |
+| **Webdriver flag** | Desactive via `context.add_init_script()` |
+| **Plugins** | Simule 5 plugins navigateur presents |
+| **Languages** | `fr-FR, fr, en-US, en` |
+| **Chrome runtime** | `window.chrome.runtime` defini |
+| **Permissions** | Geolocalisation accordee, notifications refusees |
+| **Viewport** | 1920x1080 (ecran standard) |
+| **Locale** | `fr-FR`, fuseau Europe/Paris |
+
+### Extraction des donnees
+
+L'extraction se fait par `page.evaluate()` avec JavaScript injecte dans le navigateur :
+
+1. **Navigation** vers `https://fr.investing.com/economic-calendar`, attente `networkidle`
+2. **Attente** du selecteur `table.datatable-v2_table__93S4Y` (max 30s)
+3. **Pause** supplementaire de 2s pour le rendu complet
+4. **Iteration** sur les lignes `<tbody tr>`, ignore les separateurs de date (`td[colspan]`)
+5. **Extraction** :
+   - Nom de l'evenement : lien `<a>` dans la 4e colonne (index 3)
+   - Heure : texte de la 2e colonne (index 1) - peut etre `"08:30"` ou `"57m"` (temps restant)
+   - Devise : mapping pays -> devise via dictionnaire (ISO 3166-1 alpha-2 -> ISO 4217)
+   - Impact : comptage des etoiles remplies (classe CSS `opacity-60`) : >= 3 = high, >= 2 = medium, sinon low
+   - Valeurs : actual (col 5), forecast (col 6), previous (col 7)
+
+### Gestion des erreurs
+
+- Si Playwright est absent du systeme (ImportError) : retourne `[]` silencieusement
+- 3 tentatives avec `time.sleep(3)` entre chaque
+- Timeout de navigation : 30s
+- Timeout d'attente du selecteur : 30s
+- Toute exception est capturee et loggee. En echec total, retourne `[]`
+
+### `filter_relevant_investing_events(events, symbol="EURUSD") -> list[dict]`
+
+Meme logique que `filter_relevant_events()` dans `calendar.py`, mais specifique au module Investing.com. Conserve les evenements HIGH/MEDIUM dont la devise correspond a la paire.
+
+### Mapping pays -> devise
+
+Le dictionnaire `COUNTRY_TO_CURRENCY` couvre ~50 codes pays ISO 3166-1 alpha-2. Cas notables :
+
+| Pays | Code | Devise |
+|---|---|---|
+| Etats-Unis | US | USD |
+| Japon | JP | JPY |
+| Australie | AU | AUD |
+| Allemagne, France, Italie, Espagne... | DE, FR, IT, ES... | EUR |
+| Royaume-Uni | GB | GBP |
+| Suisse | CH | CHF |
+| Canada | CA | CAD |
+| Chine | CN | CNY |
+
+### `if __name__ == "__main__"`
+
+Le module peut etre teste en ligne de commande :
+
+```powershell
+python -m src.data.investing_calendar
+```
+
+Affiche le nombre total d'evenements, les 10 premiers, puis les evenements filtres pour EURUSD.
 
 ---
 

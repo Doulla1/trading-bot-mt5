@@ -113,12 +113,50 @@ A partir d'un DataFrame pandas de 200 bougies OHLCV :
 
 ## Etape 3 : Calendrier economique
 
-**Fichier** : `src/data/calendar.py` - fonctions `fetch_events()` et `filter_relevant_events(events, symbol)`
+**Fichiers** :
+- `src/data/calendar.py` - fonctions `fetch_events()` et `filter_relevant_events(events, symbol)`
+- `src/data/investing_calendar.py` - scrapeur Playwright pour Investing.com
 
-1. Requete HTTP GET sur `https://www.forexfactory.com/calendar`
-2. Parsing HTML avec BeautifulSoup (table `calendar__table`)
-3. Extraction des colonnes : time, currency, event, impact, previous, forecast, actual
-4. Filtrage : seuls les evenements HIGH et MEDIUM sont conserves, filtres par devise de la paire
+### Cascade de sources (v3.0)
+
+Le calendrier utilise une strategie en cascade pour maximiser la disponibilite des donnees :
+
+1. **Cache SQLite** : si des donnees fraiches (TTL 4h) existent en cache, elles sont retournees immediatement
+2. **Investing.com (Playwright)** : source principale. Necessite un navigateur Chromium headless avec rendu JavaScript
+3. **ForexFactory (httpx + BeautifulSoup)** : fallback si Playwright est indisponible ou si Investing.com echoue
+4. **Evenements statiques** : dernier recours. Genere les evenements macroeconomiques majeurs recurrents a partir d'une base interne
+
+Si toutes les sources echouent, le bot continue sans donnees calendaires.
+
+### Source principale : Investing.com
+
+`src/data/investing_calendar.py` - `fetch_events_investing()`
+
+- Utilise **Playwright** avec Chromium headless pour le rendu JavaScript (Next.js)
+- Techniques anti-detection : spoofing du user-agent, desactivation du flag `webdriver`, locale `fr-FR`, viewport 1920x1080, geolocalisation Paris
+- Selecteur de la table : `table.datatable-v2_table__93S4Y`
+- Format de l'heure : `"08:30"` (heure fixe) ou `"57m"` (temps restant pour les evenements a venir)
+- Impact determine par le nombre d'icones d'etoiles remplies (classe CSS `opacity-60`) : 3+ etoiles = HIGH, 2 = MEDIUM, 1 = LOW
+- Mapping pays -> devise via dictionnaire interne (ex: JP -> JPY, AU -> AUD, DE/FR/IT/ES -> EUR)
+- 3 tentatives avec delai de 3 secondes entre chaque
+- Retourne une liste vide si Playwright n'est pas installe
+
+### Source secondaire : ForexFactory
+
+`src/data/calendar.py` - `_scrape_forexfactory()`
+
+- Requete HTTP GET avec `httpx` (timeout 15s)
+- Parsing HTML avec BeautifulSoup (table `calendar__table`, classe `calendar__row`)
+- Extraction : impact via classes CSS du span (`high`/`medium`), devise, nom de l'evenement, heure
+- Headers HTTP avec user-agent Chrome recent
+
+### Source tertiaire : Evenements statiques
+
+`src/data/calendar.py` - `_get_static_events()`
+
+- Genere les evenements macroeconomiques majeurs recurrents par jour de semaine (NFP, FOMC, Unemployment Claims, etc.)
+- Detecte les jours feries US (marche calme)
+- Couvre les 2 prochains jours (J et J+1)
 
 **Exemple de retour** :
 
@@ -136,7 +174,12 @@ A partir d'un DataFrame pandas de 200 bougies OHLCV :
 ]
 ```
 
-En cas d'echec du scraping (site inaccessible, changement de structure HTML), la fonction retourne une liste vide et le bot continue sans donnees calendaires.
+### Filtrage
+
+`filter_relevant_events(events, symbol="EURUSD")`
+
+- Ne conserve que les evenements HIGH et MEDIUM
+- Filtre par devise de la paire (ex: EURUSD conserve les evenements EUR et USD)
 
 ## Etape 4 : Analyse IA
 

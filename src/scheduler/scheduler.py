@@ -50,35 +50,35 @@ def reconcile_closed_positions(sym: str) -> int:
 
 
 def _has_high_impact_news_soon(events: list, _minutes_buffer: int = 30) -> bool:
-    """Verifie si une news HIGH impact approche dans les N prochaines minutes (v2.1).
-    Utilise les heures UTC du fallback calendrier quand dispo."""
+    """Verifie si une news HIGH impact approche dans les N prochaines minutes.
+
+    Les heures des evenements sont en UTC (converties par investing_calendar
+    ou fournies en UTC par les autres sources). On compare avec datetime.utcnow()
+    pour eviter tout decalage de fuseau horaire.
+    """
     try:
-        now = datetime.now()
+        now_utc = datetime.utcnow()
         for ev in events:
             if ev.get("impact") != "high":
                 continue
-            # Tenter de parser l'heure de l'evenement
             event_time_str = ev.get("time", "")
             if not event_time_str or event_time_str == "All day":
-                # Evenement 'All day' ou sans heure precise: on le signale mais pas de blocage
                 logger.debug(f"News HIGH sans heure precise: {ev.get('event')}")
                 continue
             try:
-                # Format attendu: "HH:MM" (UTC dans le fallback)
+                # Format attendu: "HH:MM" (toujours en UTC)
                 parts = event_time_str.split(":")
                 event_hour = int(parts[0])
                 event_minute = int(parts[1]) if len(parts) > 1 else 0
-                # On verifie si l'evenement est aujourd'hui (la date est dans le dict)
-                ev_date = ev.get("date", now.strftime("%Y-%m-%d"))
-                if ev_date != now.strftime("%Y-%m-%d"):
+                ev_date = ev.get("date", now_utc.strftime("%Y-%m-%d"))
+                if ev_date != now_utc.strftime("%Y-%m-%d"):
                     continue
-                event_dt = now.replace(hour=event_hour, minute=event_minute, second=0, microsecond=0)
-                minutes_until = (event_dt - now).total_seconds() / 60
+                event_dt = now_utc.replace(hour=event_hour, minute=event_minute, second=0, microsecond=0)
+                minutes_until = (event_dt - now_utc).total_seconds() / 60
                 if 0 < minutes_until <= _minutes_buffer:
-                    logger.info(f"News HIGH dans {minutes_until:.0f} min: {ev.get('event')} - pas d'execution")
+                    logger.info(f"News HIGH dans {minutes_until:.0f} min UTC: {ev.get('event')} - pas d'execution")
                     return True
                 elif -5 < minutes_until <= 0:
-                    # News en cours ou vient de passer (<5 min)
                     logger.info(f"News HIGH en cours/recente: {ev.get('event')} - pas d'execution")
                     return True
             except (ValueError, TypeError):
@@ -89,22 +89,26 @@ def _has_high_impact_news_soon(events: list, _minutes_buffer: int = 30) -> bool:
 
 
 def _get_session_context() -> dict:
-    """Contexte de session: heure, jour, session de marche (v2.0)."""
-    now = datetime.now()
-    hour = now.hour
-    if 2 <= hour < 8:
+    """Contexte de session: heure UTC, jour, session de marche (v2.0)."""
+    now_utc = datetime.utcnow()
+    # Les sessions forex sont basees sur l'heure UTC:
+    #   Asian:   22:00-08:00 UTC
+    #   London:  08:00-15:00 UTC
+    #   New_York: 15:00-22:00 UTC
+    hour_utc = now_utc.hour
+    if 22 <= hour_utc or hour_utc < 8:
         session = "Asian"
-    elif 8 <= hour < 15:
+    elif 8 <= hour_utc < 15:
         session = "London"
-    elif 15 <= hour < 21:
+    elif 15 <= hour_utc < 22:
         session = "New_York"
     else:
         session = "Low_liquidity"
     return {
-        "datetime": now.strftime("%Y-%m-%d %H:%M UTC"),
+        "datetime": now_utc.strftime("%Y-%m-%d %H:%M UTC"),
         "session": session,
-        "day_of_week": now.strftime("%A"),
-        "hour": hour,
+        "day_of_week": now_utc.strftime("%A"),
+        "hour": hour_utc,
     }
 
 
