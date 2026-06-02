@@ -1,0 +1,54 @@
+﻿# Configuration des poids du RuleEngine pour le backtesting
+# Chaque poids represente l'importance du signal dans le scoring
+# Valeurs positives = signal haussier, negatives = signal baissier
+
+# Seuils de decision
+buy_threshold: 25
+sell_threshold: 25
+
+# Multiplicateurs SL/TP bases sur l'ATR
+sl_atr_mult: 1.5
+tp_atr_mult: 2.5
+
+# Parametres de strategie (gestion des risques)
+max_risk_per_trade_pct: 1.0
+max_daily_loss_pct: 3.0
+max_open_positions: 1
+min_confidence_threshold: 70
+
+weights:
+  # Tendance
+  price_above_sma20: 10
+  price_above_sma50: 5
+  price_above_cloud: 15
+  price_below_cloud: -15
+  
+  # Momentum
+  rsi_oversold: 15
+  rsi_overbought: -15
+  macd_above_signal: 10
+  macd_histogram_rising: 5
+  
+  # Force (ADX)
+  adx_di_plus_strong: 10
+  adx_di_minus_strong: -10
+  
+  # Volatilite / Bollinger
+  bb_near_lower: 10
+  bb_near_upper: -10
+  
+  # Points pivots
+  near_support: 10
+  near_resistance: -10
+  
+  # Patterns chandeliers
+  bullish_pattern: 15
+  bearish_pattern: -15
+  
+  # Structure de marche
+  higher_high_higher_low: 10
+  lower_high_lower_low: -10
+  
+  # Confluence multi-timeframe (H1)
+  h1_trend_bullish: 5
+  h1_trend_bearish: -5

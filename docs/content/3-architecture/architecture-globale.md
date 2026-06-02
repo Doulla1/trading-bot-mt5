@@ -129,36 +129,26 @@ Configuration centralisee via `pydantic-settings`. Charge le `.env`, chemins iso
 | `database.py` | SQLite thread-safe, CRUD trades/analysis, bot_state, calendar_cache |
 | `models.py` | Dataclasses Trade, AnalysisLog |
 
+### `src/backtest/` - Backtesting (v2.2)
+
+| Fichier | Responsabilite |
+|---|---|
+| `data_source.py` | Lecture CSV OHLCV, remplace le bridge MT5 pour le backtesting |
+| `rules_engine.py` | Scoring pondere 20 signaux, remplace la couche IA (OCR + DeepSeek) |
+| `simulated_executor.py` | Positions virtuelles avec SL/TP, slippage, commission |
+| `strategy_adapter.py` | Regles de risk management repliquees sans MT5 |
+| `engine.py` | Boucle barre-par-barre principale |
+| `report.py` | Metriques de performance : Sharpe, Sortino, drawdown, win rate |
+| `optimizer.py` | Grid search sur les parametres du RuleEngine |
+| `weights.yaml` | Configuration des poids des 20 signaux |
+
+Le backtesteur utilise un moteur de scoring deterministe (RuleEngine) qui approxime le comportement de l'IA en production. Cela permet des backtests gratuits, rapides et reproductibles, sans cout API. Voir [ADR-002](decision-records/ADR-002-backtesteur-hybride.md).
+
 ### `src/scheduler/` - Orchestrateur
 
 | Fichier | Responsabilite |
 |---|---|
 | `scheduler.py` | Pipeline complet: gestion positions → reconciliation → indicateurs multi-TF → chart genere → OCR → Decision DeepSeek → execution |
-|---|---|
-| `bridge.py` | Connexion/deconnexion MT5, recuperation OHLCV, infos compte et symbole |
-| `executor.py` | Ordres de trading (ouverture, fermeture), calcul de volume, position sizing |
-| `indicators.py` | Calcul des indicateurs techniques (RSI, MACD, Bollinger, ATR, SMA) |
-| `screenshots.py` | Capture d'ecran du graphique, nettoyage des fichiers obsoletes |
-
-### `src/ai/` - Intelligence Artificielle
-
-| Fichier | Responsabilite |
-|---|---|
-| `vision.py` | Appel API GPT-4o-mini Vision, encodage base64, parsing JSON, validation |
-| `strategy.py` | Moteur de strategie : verification des regles de risque, execution |
-| `prompts.py` | Construction du prompt envoye a l'IA |
-
-### `src/data/` - Donnees
-
-| Fichier | Responsabilite |
-|---|---|
-| `calendar.py` | Scraping ForexFactory, filtrage par devise |
-| `database.py` | Connexion SQLite singleton, creation des tables, fonctions CRUD |
-| `models.py` | Dataclasses `Trade` et `AnalysisLog` |
-
-### `src/scheduler/scheduler.py`
-
-Orchestrateur principal. Contient `run_once()` (cycle unique) et `run_forever()` (boucle infinie).
 
 ### `src/utils/logger.py`
 
@@ -169,6 +159,15 @@ Configuration du logger Loguru avec sortie console coloree et fichier avec rotat
 ```mermaid
 flowchart TD
     run --> scheduler
+    backtest --> engine
+    engine --> data_source
+    engine --> rules_engine
+    engine --> simulated_executor
+    engine --> strategy_adapter
+    engine --> indicators
+    engine --> report
+    optimizer --> engine
+    optimizer --> rules_engine
     scheduler --> bridge
     scheduler --> screenshots
     scheduler --> indicators

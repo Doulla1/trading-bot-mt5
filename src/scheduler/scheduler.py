@@ -26,24 +26,33 @@ def reconcile_closed_positions(sym: str) -> int:
         ).fetchall()
         reconciled = 0
         for row in open_tickets:
-            ticket = row[0]
-            positions = mt5.positions_get(ticket=ticket)
+            deal_ticket = row[0]
+            positions = mt5.positions_get(ticket=deal_ticket)
             if positions is None or len(positions) == 0:
                 # La position a ete fermee (SL, TP, ou manuellement)
-                from datetime import datetime as dt
-                # BUG-B: utiliser position= (pas ticket=) pour retrouver les deals de la position
-                deals = mt5.history_deals_get(position=ticket)
+                # BUG-FIX: deal_ticket est un deal ticket, pas un position ID.
+                # On doit d'abord retrouver le position_id via le deal, puis
+                # chercher les deals de cette position.
+                deal_info = mt5.history_deals_get(ticket=deal_ticket)
+                if deal_info and len(deal_info) > 0:
+                    pos_id = deal_info[0].position_id
+                    deals = mt5.history_deals_get(position=pos_id)
+                else:
+                    deals = None
+
                 if deals and len(deals) > 0:
                     # Chercher specifiquement le deal de SORTIE (entry=1 = OUT)
                     close_deal = next((d for d in deals if d.entry == 1), None)
                     if close_deal:
-                        log_trade_close(ticket, close_deal.price, close_deal.profit)
+                        log_trade_close(deal_ticket, close_deal.price, close_deal.profit)
                     else:
-                        log_trade_close(ticket, 0.0, 0.0)
+                        # Fallback: prendre le dernier deal (souvent le OUT)
+                        last_deal = deals[-1]
+                        log_trade_close(deal_ticket, last_deal.price, last_deal.profit)
                     reconciled += 1
                 else:
                     # Position disparue sans historique: marquer comme fermee
-                    log_trade_close(ticket, 0.0, 0.0)
+                    log_trade_close(deal_ticket, 0.0, 0.0)
                     reconciled += 1
         if reconciled:
             logger.info(f"Reconciliation: {reconciled} trade(s) ferme(s) mis a jour")
@@ -230,6 +239,7 @@ def run_forever() -> None:
     try:
         from apscheduler.schedulers.blocking import BlockingScheduler
         from apscheduler.triggers.interval import IntervalTrigger
+        from apscheduler.triggers.cron import CronTrigger
 
         scheduler = BlockingScheduler(timezone="UTC")
         scheduler.add_job(
@@ -240,6 +250,24 @@ def run_forever() -> None:
             max_instances=1,
             misfire_grace_time=60,
         )
+
+        # Job rapport journalier a l'heure configuree (defaut 23:00 UTC)
+        try:
+            from src.reports.daily_report import send_daily_report
+            scheduler.add_job(
+                send_daily_report,
+                CronTrigger(hour=settings.report_send_hour_utc, minute=settings.report_send_minute_utc),
+                id="daily_report",
+                name="Rapport journalier par email",
+                max_instances=1,
+                misfire_grace_time=300,
+            )
+            logger.info(
+                f"Rapport journalier programme a {settings.report_send_hour_utc:02d}:{settings.report_send_minute_utc:02d} UTC"
+            )
+        except Exception as e:
+            logger.warning(f"Impossible de programmer le rapport journalier: {e}")
+
         logger.info(f"APScheduler demarre - cycle toutes les {settings.analysis_interval_minutes} minutes")
         scheduler.start()
     except KeyboardInterrupt:

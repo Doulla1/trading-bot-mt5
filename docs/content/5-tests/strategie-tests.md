@@ -61,6 +61,13 @@ pytest -v
 | `indicators.py` | Calcul RSI, MACD, Bollinger, ATR sur donnees connues | Haute |
 | `strategy.py` | Regles de risque : limite perte, circuit breaker, spread filter | Haute |
 | `database.py` | CRUD, statistiques, singleton thread-safe | Haute |
+| `backtest/rules_engine.py` | Scoring 20 signaux, seuils BUY/SELL/HOLD, calcul SL/TP | Haute |
+| `backtest/strategy_adapter.py` | Circuit breaker, daily loss limit, position sizing | Haute |
+| `backtest/simulated_executor.py` | Ouverture/fermeture positions, slippage, commission | Moyenne |
+| `backtest/engine.py` | Boucle barre-par-barre, integration des composants | Moyenne |
+| `backtest/data_source.py` | Lecture CSV, indexation par datetime | Moyenne |
+| `backtest/report.py` | Calcul Sharpe, Sortino, drawdown, profit factor | Moyenne |
+| `backtest/optimizer.py` | Grid search, classement par metrique | Basse |
 | `models.py` | Creation des dataclasses | Basse |
 | `config.py` | Chargement .env, chemins relatifs | Moyenne |
 | `screenshots.py` | Nettoyage vieux fichiers | Moyenne |

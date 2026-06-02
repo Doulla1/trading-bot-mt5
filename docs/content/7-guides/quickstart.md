@@ -89,4 +89,71 @@ Le bot supporte le lancement parallele de plusieurs instances, une par actif :
 | `Module introuvable` | Verifier que `.venv` est active et `pip install -e .` a ete execute |
 | `Base de donnees verrouillee` | Attendre la fin du cycle en cours ou supprimer `data/trading.db` |
 
+## 6. Envoyer un rapport journalier de test
+
+Le module de rapports genere un email recapitulatif avec les trades du jour et une analyse DeepSeek V4 Pro.
+
+```powershell
+# Rapport du jour (aujourd'hui UTC)
+python scripts/send_report.py
+
+# Rapport d'une date specifique
+python scripts/send_report.py 2026-06-01
+```
+
+**Prerequis** : la variable `MAILER_API_SECRET` doit etre configuree dans le `.env` (cle API de `mailing.weltaare-tech.com`).
+
+Le rapport contient :
+- Des cartes resume (P&L, win rate, meilleur/pire trade)
+- Un tableau par symbole avec tous les trades du jour
+- Une analyse DeepSeek V4 Pro (Resume, Forces, Faiblesses, Recommandations)
+
+## 7. Backtesting
+
+Le backtesteur permet de tester les strategies sur des donnees historiques sans cout API et sans risque.
+
+### Export des donnees MT5
+
+```powershell
+# Afficher les instructions d'export
+python backtest.py --export --symbol EURUSD
+
+# Le CSV genere doit etre place dans data/historical/eurusd/
+```
+
+### Lancer un backtest
+
+```powershell
+# Backtest simple (1 symbole, 1 mois)
+python backtest.py --symbol EURUSD --from 2026-05-01 --to 2026-05-31
+
+# Backtest multi-symboles
+python backtest.py --multi --from 2026-05-01 --to 2026-05-31
+
+# Avec un fichier de poids personnalise
+python backtest.py --symbol EURUSD --from 2026-05-01 --to 2026-05-31 --weights my_weights.yaml
+```
+
+### Optimiser les parametres
+
+```powershell
+# Grid search sur les parametres du RuleEngine
+python backtest.py --symbol EURUSD --from 2026-05-01 --to 2026-05-31 --optimize --metric sharpe_ratio
+
+# Exporter les resultats d'optimisation
+python backtest.py --symbol EURUSD --optimize --metric profit_factor --output best_params.json
+```
+
+### Exporter les trades
+
+```powershell
+# Export CSV des trades individuels
+python backtest.py --symbol EURUSD --from 2026-05-01 --to 2026-05-31 --output trades.csv
+
+# Export JSON multi-symboles
+python backtest.py --multi --from 2026-05-01 --to 2026-05-31 --output all_trades.json
+```
+
+> **Note** : Le backtesteur utilise un moteur de scoring deterministe (RuleEngine) qui approxime le comportement de l'IA. Les resultats peuvent differer de la performance live. Voir [ADR-002](../3-architecture/decision-records/ADR-002-backtesteur-hybride.md) pour les details.
+
 Pour plus de details, voir le [guide de depannage](depannage.md).

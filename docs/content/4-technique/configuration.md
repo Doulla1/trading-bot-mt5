@@ -83,6 +83,18 @@ LOG_FILE=logs/trading-bot.log
 |---|---|---|---|
 | `ANALYSIS_INTERVAL_MINUTES` | `int` | `15` | Intervalle entre chaque cycle d'analyse (en minutes) |
 
+### Rapport journalier par email
+
+| Variable | Type | Defaut | Description |
+|---|---|---|---|
+| `MAILER_API_SECRET` | `str` | `""` | Cle API pour l'envoi d'email via `mailing.weltaare-tech.com`. Requis pour les rapports. |
+| `MAILER_API_URL` | `str` | `https://mailing.weltaare-tech.com/api/v1/emails` | URL de l'API d'envoi d'email |
+| `REPORT_RECIPIENT_EMAIL` | `str` | `dialloabdoul99c@gmail.com` | Adresse email du destinataire du rapport |
+| `REPORT_RECIPIENT_NAME` | `str` | `""` | Nom du destinataire (optionnel, apparait dans l'email) |
+| `REPORT_SENDER_NAME` | `str` | `Trading Bot MT5` | Nom de l'expediteur dans l'email |
+| `REPORT_SEND_HOUR_UTC` | `int` | `23` | Heure d'envoi du rapport en UTC (0-23) |
+| `REPORT_SEND_MINUTE_UTC` | `int` | `0` | Minute d'envoi du rapport en UTC (0-59) |
+
 ### Chemins et logs
 
 | Variable | Type | Defaut | Description |

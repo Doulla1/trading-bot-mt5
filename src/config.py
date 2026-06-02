@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_file: str = "logs/trading-bot.log"
 
+    # Rapport journalier par email
+    mailer_api_secret: str = ""
+    mailer_api_url: str = "https://mailing.weltaare-tech.com/api/v1/emails"
+    report_recipient_email: str = "dialloabdoul99c@gmail.com"
+    report_recipient_name: str = ""
+    report_sender_name: str = "Trading Bot MT5"
+    report_send_hour_utc: int = 23
+    report_send_minute_utc: int = 0
+
     @property
     def project_root(self) -> Path:
         return Path(__file__).resolve().parent.parent

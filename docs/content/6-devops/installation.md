@@ -63,7 +63,12 @@ MAX_RISK_PER_TRADE_PCT=1.0
 MAX_DAILY_LOSS_PCT=3.0
 MAX_OPEN_POSITIONS=1
 MIN_CONFIDENCE_THRESHOLD=70
-```
+
+# Rapport journalier par email
+MAILER_API_SECRET=votre-cle-api-mailer
+# MAILER_API_URL=https://mailing.weltaare-tech.com/api/v1/emails  # defaut
+# REPORT_RECIPIENT_EMAIL=dialloabdoul99c@gmail.com  # defaut
+# REPORT_SEND_HOUR_UTC=23  # defaut
 ```
 
 Voir [Configuration](../4-technique/configuration.md) pour la liste complete des variables.
