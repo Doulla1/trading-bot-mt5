@@ -157,7 +157,7 @@ class TestStrategyFilters:
             "stop_loss_pips": 20,
             "take_profit_pips": 40,
             "risk_level": "MEDIUM",
-            "indicators": {"rsi": rsi, "bb_position": bb_pos},
+            "indicators": {"rsi_14": rsi, "bb_position_pct": bb_pos},
         }
 
     def test_rsi_overbought_blocks_buy(self):

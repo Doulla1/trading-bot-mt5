@@ -11,7 +11,7 @@ from src.mt5.executor import (
     open_position, close_position, calculate_position_size,
     get_open_positions, count_open_positions, TradeResult,
 )
-from src.data.database import get_db
+from src.data.database import get_db, log_trade_close
 
 
 @dataclass
@@ -57,6 +57,15 @@ def execute_decision(decision: dict) -> StrategyResult:
                 logger.info(f"Fermeture {existing_dir} (signaux opposes), pas de reversal immediat")
                 close_res = close_position(existing_pos["ticket"])
                 result.closed_positions.append(close_res)
+                # BUG-D: log immediat pour ne pas attendre la reconciliation
+                if close_res.success:
+                    deals = mt5.history_deals_get(position=existing_pos["ticket"])
+                    close_deal = next((d for d in deals if d.entry == 1), None) if deals else None
+                    log_trade_close(
+                        existing_pos["ticket"],
+                        close_res.price,
+                        close_deal.profit if close_deal else 0.0,
+                    )
                 return result
             else:
                 # Meme direction: on garde la position, le trailing/breakeven s'en occupe
@@ -144,8 +153,8 @@ def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
         return False
     # PROB-8: Filtre RSI/BB - evite les entrees en zone surchetee/survendue
     indicators = decision.get("indicators", {})
-    rsi = indicators.get("rsi", 50) if indicators else 50
-    bb_pos = indicators.get("bb_position", 50) if indicators else 50
+    rsi = indicators.get("rsi_14", 50) if indicators else 50
+    bb_pos = indicators.get("bb_position_pct", 50) if indicators else 50
     action = decision.get("action", "")
     if action == "BUY" and rsi > 75:
         logger.info(f"Filtre RSI/BB: BUY bloque (RSI={rsi:.1f} > 75 - zone surchetee)")
@@ -256,21 +265,23 @@ def _apply_breakeven(pos: dict) -> bool:
     current_sl = pos.get("sl", 0)
     ticket = pos.get("ticket", 0)
     tick = mt5.symbol_info_tick(settings.trading_symbol)
+    # BUG-C: guard sym_info (identique a _apply_trailing_stop)
+    sym_info = mt5.symbol_info(settings.trading_symbol)
 
-    if tick is None or entry_price == 0:
+    if tick is None or sym_info is None or entry_price == 0:
         return False
 
     if pos.get("type") == mt5.POSITION_TYPE_BUY:
-        sl_distance_pips = (entry_price - current_sl) / (10 * mt5.symbol_info(settings.trading_symbol).point) if current_sl else 0
-        profit_distance_pips = (tick.bid - entry_price) / (10 * mt5.symbol_info(settings.trading_symbol).point)
+        sl_distance_pips = (entry_price - current_sl) / (10 * sym_info.point) if current_sl else 0
+        profit_distance_pips = (tick.bid - entry_price) / (10 * sym_info.point)
         # PROB-6: Breakeven des que profit >= 50% de la distance SL (plus prudent et protecteur)
         if profit_distance_pips >= sl_distance_pips * 0.5 and current_sl < entry_price:
             _modify_sl(ticket, entry_price)
             logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a l'entree {entry_price}")
             return True
     else:
-        sl_distance_pips = (current_sl - entry_price) / (10 * mt5.symbol_info(settings.trading_symbol).point) if current_sl else 0
-        profit_distance_pips = (entry_price - tick.ask) / (10 * mt5.symbol_info(settings.trading_symbol).point)
+        sl_distance_pips = (current_sl - entry_price) / (10 * sym_info.point) if current_sl else 0
+        profit_distance_pips = (entry_price - tick.ask) / (10 * sym_info.point)
         # PROB-6: Breakeven des que profit >= 50% de la distance SL
         if profit_distance_pips >= sl_distance_pips * 0.5 and current_sl > entry_price:
             _modify_sl(ticket, entry_price)

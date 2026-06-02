@@ -31,11 +31,15 @@ def reconcile_closed_positions(sym: str) -> int:
             if positions is None or len(positions) == 0:
                 # La position a ete fermee (SL, TP, ou manuellement)
                 from datetime import datetime as dt
-                deals = mt5.history_deals_get(ticket=ticket)
+                # BUG-B: utiliser position= (pas ticket=) pour retrouver les deals de la position
+                deals = mt5.history_deals_get(position=ticket)
                 if deals and len(deals) > 0:
-                    close_deal = deals[-1]
-                    profit = close_deal.profit if hasattr(close_deal, "profit") else 0.0
-                    log_trade_close(ticket, close_deal.price, profit)
+                    # Chercher specifiquement le deal de SORTIE (entry=1 = OUT)
+                    close_deal = next((d for d in deals if d.entry == 1), None)
+                    if close_deal:
+                        log_trade_close(ticket, close_deal.price, close_deal.profit)
+                    else:
+                        log_trade_close(ticket, 0.0, 0.0)
                     reconciled += 1
                 else:
                     # Position disparue sans historique: marquer comme fermee
@@ -91,16 +95,19 @@ def _has_high_impact_news_soon(events: list, _minutes_buffer: int = 30) -> bool:
 def _get_session_context() -> dict:
     """Contexte de session: heure UTC, jour, session de marche (v2.0)."""
     now_utc = datetime.utcnow()
-    # Les sessions forex sont basees sur l'heure UTC:
-    #   Asian:   22:00-08:00 UTC
-    #   London:  08:00-15:00 UTC
-    #   New_York: 15:00-22:00 UTC
+    # Sessions forex en UTC (aligne avec run_multi.py - INC-A fix):
+    #   Asian:          22:00-08:00 UTC
+    #   London:         08:00-13:00 UTC
+    #   London_NY_ovlp: 13:00-17:00 UTC  (periode la plus liquide)
+    #   New_York:       17:00-22:00 UTC
     hour_utc = now_utc.hour
     if 22 <= hour_utc or hour_utc < 8:
         session = "Asian"
-    elif 8 <= hour_utc < 15:
+    elif 8 <= hour_utc < 13:
         session = "London"
-    elif 15 <= hour_utc < 22:
+    elif 13 <= hour_utc < 17:
+        session = "London_New_York_overlap"
+    elif 17 <= hour_utc < 22:
         session = "New_York"
     else:
         session = "Low_liquidity"
@@ -160,7 +167,7 @@ def run_once() -> None:
         open_positions = executor.get_open_positions(sym)
         account_info = bridge.get_account_info() or {}
         trade_history = get_recent_trades(limit=20)
-        performance_stats = get_statistics()  # win rate, profit total, etc.
+        performance_stats = get_statistics(symbol=sym)  # stats filtrees par symbole (INC-B fix)
 
         # 7. OCR du chart via GPT-4o-mini (utilise le chart genere) v2.1
         ocr_data = None
@@ -190,6 +197,8 @@ def run_once() -> None:
 
         # 9. Log + execution
         if decision:
+            # BUG-A: enrichir la decision avec les indicateurs pour les filtres RSI/BB (PROB-8)
+            decision["indicators"] = indicators_data
             strat_result = execute_decision(decision)
             was_exec = strat_result.trade_result is not None and strat_result.trade_result.success
             log_analysis(sym, tf, decision, screenshot_str, indicators_data, relevant_events, was_exec)

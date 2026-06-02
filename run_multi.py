@@ -180,7 +180,7 @@ def run_symbol(cfg: dict) -> None:
     open_positions = executor.get_open_positions(sym)
     account_info = bridge.get_account_info() or {}
     trade_history = get_recent_trades(limit=20, symbol=sym)
-    perf_stats = get_statistics()
+    perf_stats = get_statistics(symbol=sym)
     session_ctx = _get_session_context()
 
     decision = make_decision(

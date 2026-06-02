@@ -130,20 +130,35 @@ def get_recent_trades(limit=20, symbol: str | None = None) -> list:
     return [dict(r) for r in rows]
 
 
-def get_statistics() -> dict:
-    """Calcule les statistiques de trading."""
+def get_statistics(symbol: str | None = None) -> dict:
+    """Calcule les statistiques de trading, filtrees par symbole si fourni (INC-B fix)."""
     db = get_db()
     stats = {}
-    row = db.execute("SELECT COUNT(*) as total, SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END) as wins FROM trades WHERE profit IS NOT NULL").fetchone()
+    # Filtrer par symbole pour eviter de melanger les stats multi-paires
+    sym_filter = "AND symbol = ?" if symbol else ""
+    sym_params = [symbol] if symbol else []
+
+    row = db.execute(
+        f"SELECT COUNT(*) as total, SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END) as wins "
+        f"FROM trades WHERE profit IS NOT NULL {sym_filter}",
+        sym_params,
+    ).fetchone()
     stats["total_closed"] = row[0]
     stats["wins"] = row[1] or 0
     stats["losses"] = stats["total_closed"] - stats["wins"]
     stats["win_rate"] = round(stats["wins"] / stats["total_closed"] * 100, 1) if stats["total_closed"] > 0 else 0
 
-    row = db.execute("SELECT COALESCE(SUM(profit), 0) FROM trades WHERE profit IS NOT NULL").fetchone()
+    row = db.execute(
+        f"SELECT COALESCE(SUM(profit), 0) FROM trades WHERE profit IS NOT NULL {sym_filter}",
+        sym_params,
+    ).fetchone()
     stats["total_profit"] = round(row[0], 2)
 
-    row = db.execute("SELECT COALESCE(AVG(decision_confidence), 0) FROM analysis_logs").fetchone()
+    log_filter = "AND symbol = ?" if symbol else ""
+    row = db.execute(
+        f"SELECT COALESCE(AVG(decision_confidence), 0) FROM analysis_logs WHERE 1=1 {log_filter}",
+        sym_params,
+    ).fetchone()
     stats["avg_confidence"] = round(row[0], 1)
 
     return stats
