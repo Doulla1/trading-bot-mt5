@@ -23,7 +23,7 @@ flowchart TD
     N -- Oui --> P{Max positions < 1 ?}
     P -- Non --> Q[Trade ignore]
     P -- Oui --> R[Executer ordre + SL/TP]
-    R --> S[Gestion active: Breakeven, Trailing, Time Exit]
+    R --> S[Gestion active: Breakeven 1.2R, Trailing, Time Exit structure]
 ```
 
 ### 1. Marche ouvert
@@ -162,6 +162,63 @@ if action == "CLOSE":
 - `_has_high_impact_news_soon()` verifie les evenements du calendrier
 - Protege contre la volatilite extreme (NFP, CPI, decisions de taux)
 
+### 14. Breakeven a 1.2R (v3.0)
+
+**Regle** : Le stop loss est deplace au prix d'entree (breakeven) quand le profit atteint **120% du SL initial** (1.2R).
+
+```python
+# v3.0: Breakeven a 1.2R (couvre commissions/swaps + marge de respiration)
+if profit_distance_pips >= sl_distance_pips * 1.2 and current_sl < entry_price:
+    _modify_sl(ticket, entry_price)
+```
+
+- **Avant v3.0** : breakeven a 0.5R (trop agressif pour Forex/XAUUSD)
+- **Apres v3.0** : breakeven a 1.2R - laisse le trade respirer au-dessus du bruit de marche
+- Couvre les commissions et swaps avant de securiser la position
+- Evite l'epidemie de "zero-win" ou le breakeven coupe systematiquement les trades gagnants
+
+### 15. Time Exit base sur la structure de marche (v3.0)
+
+**Regle** : Les positions stagnantes sont fermees si la structure de marche s'inverse contre le trade (et non plus apres un delai arbitraire).
+
+```python
+def _check_time_exit(pos) -> bool:
+    # BUY: ferme si prix cloture sous SMA20 OU structure Higher Low cassee
+    # SELL: ferme si prix cloture au-dessus SMA20 OU structure Lower High cassee
+    # Securite: stagnation totale >4h (quelle que soit la direction)
+```
+
+**Logique de sortie** :
+
+| Type de position | Condition de sortie |
+|---|---|
+| BUY | Prix < SMA20 (casse la tendance haussiere) |
+| BUY | Swing low recent < swing low precedent (structure HL cassee) |
+| SELL | Prix > SMA20 (casse la tendance baissiere) |
+| SELL | Swing high recent > swing high precedent (structure LH cassee) |
+| Tous | Age > 4h ET P&L quasi nul (< 0.50) - securite absolue |
+
+- **Avant v3.0** : timer arbitraire de 120 minutes (ferme mecaniquement les perdants)
+- **Apres v3.0** : logique de structure de marche - laisse les consolidations saines respirer
+- Fallback sur le chronometre 4h si les donnees MT5 (rates) sont indisponibles
+
+### 16. Filtres anti-tendance conditionnes a l'ADX (v3.0)
+
+**Regle** : Les filtres RSI/Bollinger Band ne sont appliques qu'en regime de ranging (ADX <= 25). En tendance (ADX > 25), ils sont desactives.
+
+```python
+# v3.0: Filtres RSI/BB conditionnes au regime de marche
+if adx <= 25:  # Ranging: appliquer les filtres mean-reversion
+    if action == "BUY" and rsi > 75:   # bloque
+    if action == "SELL" and rsi < 25:  # bloque
+elif adx > 25:  # Trending: desactiver les filtres
+    # Le RSI peut rester surachete/survendu pendant des heures en tendance
+```
+
+- **Avant v3.0** : RSI > 75 ou BB_position > 100% bloquaient systematiquement les entrees
+- **Apres v3.0** : en tendance forte, le RSI peut rester surachete pendant des heures et le prix surfer sur les bandes de Bollinger - le bot ne bloque PLUS ces entrees
+- Evite de manquer les moves explosifs ou le prix ne corrige jamais
+
 ## Tableau recapitulatif
 
 | Regle | Valeur | Fichier | Configurable |
@@ -178,3 +235,7 @@ if action == "CLOSE":
 | Circuit breaker | 4 pertes consecutives / 4h pause | `strategy.py` | Non (hardcode) |
 | Reconciliation | A chaque cycle | `scheduler.py` | Non |
 | News HIGH impact | Bloque execution | `scheduler.py` | Non |
+| Breakeven | 1.2R (120% du SL initial) | `strategy.py` | Non (hardcode) |
+| Time exit | Structure de marche (SMA20 + HH/HL) + securite 4h | `strategy.py` | Non (hardcode) |
+| Filtres RSI/BB | ADX-conditionnes (ranging uniquement) | `strategy.py` | Non (hardcode) |
+| Stops level broker | Verifie `trade_stops_level` avant modif SL | `strategy.py` | Non (hardcode) |

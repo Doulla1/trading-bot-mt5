@@ -148,10 +148,14 @@ class TestDatabaseIsolation:
 
 
 class TestStrategyFilters:
-    """Tests des filtres RSI/BB (PROB-8)."""
+    """Tests des filtres RSI/BB (PROB-8) et ADX-conditioned filters (v3.0).
 
-    def _make_decision(self, action, confidence=75, rsi=50, bb_pos=50):
-        return {
+    Les tests sans adx_14 utilisent le default adx=20 (<= 25, ranging),
+    donc les filtres RSI/BB sont ACTIFS (comportement legacy preserve).
+    """
+
+    def _make_decision(self, action, confidence=75, rsi=50, bb_pos=50, adx=None):
+        d = {
             "action": action,
             "confidence": confidence,
             "stop_loss_pips": 20,
@@ -159,9 +163,12 @@ class TestStrategyFilters:
             "risk_level": "MEDIUM",
             "indicators": {"rsi_14": rsi, "bb_position_pct": bb_pos},
         }
+        if adx is not None:
+            d["indicators"]["adx_14"] = adx
+        return d
 
-    def test_rsi_overbought_blocks_buy(self):
-        """RSI > 75 doit bloquer un BUY."""
+    def test_rsi_overbought_blocks_buy_ranging(self):
+        """RSI > 75, ADX default (20, ranging) -> bloque BUY."""
         from unittest.mock import patch, MagicMock
         import src.ai.strategy as strat
 
@@ -174,6 +181,21 @@ class TestStrategyFilters:
             result = strat._passes_trade_filters(decision, symbol_info)
 
         assert result is False
+
+    def test_rsi_overbought_allows_buy_trending(self):
+        """RSI > 75, ADX=30 (trending) -> autorise BUY (filtres desactives)."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = self._make_decision("BUY", rsi=78, adx=30)
+        symbol_info = {"spread": 5, "point": 0.00001, "digits": 5}
+
+        with patch.object(strat, "count_open_positions", return_value=0), \
+             patch.object(strat, "_circuit_breaker_active", return_value=False), \
+             patch.object(strat, "_count_consecutive_losses", return_value=0):
+            result = strat._passes_trade_filters(decision, symbol_info)
+
+        assert result is True
 
     def test_rsi_normal_allows_buy(self):
         """RSI normal (55) ne doit pas bloquer un BUY."""
@@ -190,8 +212,8 @@ class TestStrategyFilters:
 
         assert result is True
 
-    def test_bb_above_upper_band_blocks_buy(self):
-        """BB_position > 100 doit bloquer un BUY."""
+    def test_bb_above_upper_band_blocks_buy_ranging(self):
+        """BB > 100, ADX default (20, ranging) -> bloque BUY."""
         from unittest.mock import patch
         import src.ai.strategy as strat
 
@@ -205,8 +227,23 @@ class TestStrategyFilters:
 
         assert result is False
 
-    def test_rsi_oversold_blocks_sell(self):
-        """RSI < 25 doit bloquer un SELL."""
+    def test_bb_above_upper_band_allows_buy_trending(self):
+        """BB > 100, ADX=30 (trending) -> autorise BUY."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = self._make_decision("BUY", rsi=60, bb_pos=110, adx=30)
+        symbol_info = {"spread": 5, "point": 0.00001, "digits": 5}
+
+        with patch.object(strat, "count_open_positions", return_value=0), \
+             patch.object(strat, "_circuit_breaker_active", return_value=False), \
+             patch.object(strat, "_count_consecutive_losses", return_value=0):
+            result = strat._passes_trade_filters(decision, symbol_info)
+
+        assert result is True
+
+    def test_rsi_oversold_blocks_sell_ranging(self):
+        """RSI < 25, ADX default (20, ranging) -> bloque SELL."""
         from unittest.mock import patch
         import src.ai.strategy as strat
 
@@ -219,4 +256,79 @@ class TestStrategyFilters:
             result = strat._passes_trade_filters(decision, symbol_info)
 
         assert result is False
+
+    def test_rsi_oversold_allows_sell_trending(self):
+        """RSI < 25, ADX=30 (trending) -> autorise SELL."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = self._make_decision("SELL", rsi=20, adx=30)
+        symbol_info = {"spread": 5, "point": 0.00001, "digits": 5}
+
+        with patch.object(strat, "count_open_positions", return_value=0), \
+             patch.object(strat, "_circuit_breaker_active", return_value=False), \
+             patch.object(strat, "_count_consecutive_losses", return_value=0):
+            result = strat._passes_trade_filters(decision, symbol_info)
+
+        assert result is True
+
+    def test_bb_below_lower_blocks_sell_ranging(self):
+        """BB < 0, ADX default (20, ranging) -> bloque SELL."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = self._make_decision("SELL", rsi=40, bb_pos=-5)
+        symbol_info = {"spread": 5, "point": 0.00001, "digits": 5}
+
+        with patch.object(strat, "count_open_positions", return_value=0), \
+             patch.object(strat, "_circuit_breaker_active", return_value=False), \
+             patch.object(strat, "_count_consecutive_losses", return_value=0):
+            result = strat._passes_trade_filters(decision, symbol_info)
+
+        assert result is False
+
+    def test_bb_below_lower_allows_sell_trending(self):
+        """BB < 0, ADX=30 (trending) -> autorise SELL."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = self._make_decision("SELL", rsi=40, bb_pos=-5, adx=30)
+        symbol_info = {"spread": 5, "point": 0.00001, "digits": 5}
+
+        with patch.object(strat, "count_open_positions", return_value=0), \
+             patch.object(strat, "_circuit_breaker_active", return_value=False), \
+             patch.object(strat, "_count_consecutive_losses", return_value=0):
+            result = strat._passes_trade_filters(decision, symbol_info)
+
+        assert result is True
+
+    def test_adx_boundary_25_rsi_overbought_blocks_buy(self):
+        """ADX = 25 exactement (<= 25, ranging) -> RSI > 75 bloque BUY."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = self._make_decision("BUY", rsi=78, adx=25)
+        symbol_info = {"spread": 5, "point": 0.00001, "digits": 5}
+
+        with patch.object(strat, "count_open_positions", return_value=0), \
+             patch.object(strat, "_circuit_breaker_active", return_value=False), \
+             patch.object(strat, "_count_consecutive_losses", return_value=0):
+            result = strat._passes_trade_filters(decision, symbol_info)
+
+        assert result is False
+
+    def test_adx_boundary_26_rsi_overbought_allows_buy(self):
+        """ADX = 26 (> 25, trending) -> RSI > 75 autorise BUY."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = self._make_decision("BUY", rsi=78, adx=26)
+        symbol_info = {"spread": 5, "point": 0.00001, "digits": 5}
+
+        with patch.object(strat, "count_open_positions", return_value=0), \
+             patch.object(strat, "_circuit_breaker_active", return_value=False), \
+             patch.object(strat, "_count_consecutive_losses", return_value=0):
+            result = strat._passes_trade_filters(decision, symbol_info)
+
+        assert result is True
 

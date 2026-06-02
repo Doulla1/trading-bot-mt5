@@ -137,15 +137,109 @@ Reponds UNIQUEMENT en JSON:
 # ============================================================
 
 def _format_indicators_v2(ind: dict) -> str:
+    """Formateur v3.0: envoie des etats semantiques au lieu de valeurs brutes.
+    Les LLMs sont des moteurs de logique semantique, pas des calculateurs mathematiques."""
     lines = []
-    lines.append(f"RSI 14: {ind.get('rsi_14', 'N/A')}")
-    lines.append(f"MACD: Line={ind.get('macd_line', '?')}, Signal={ind.get('macd_signal', '?')}, Histo={ind.get('macd_histogram', '?')}")
-    lines.append(f"SMA20: {ind.get('sma_20', 'N/A')}, SMA50: {ind.get('sma_50', 'N/A')}")
-    lines.append(f"EMA20: {ind.get('ema_20', 'N/A')}, EMA200: {ind.get('ema_200', 'N/A')}")
-    lines.append(f"Bollinger: Up={ind.get('bb_upper', '?')}, Mid={ind.get('bb_middle', '?')}, Low={ind.get('bb_lower', '?')}, Pos={ind.get('bb_position_pct', '?')}%")
-    lines.append(f"ATR 14: {ind.get('atr_14', 'N/A')}")
-    lines.append(f"Trend CT: {ind.get('trend_short', 'N/A')}, MT: {ind.get('trend_medium', 'N/A')}")
-    lines.append(f"High 24h: {ind.get('high_24h', 'N/A')}, Low 24h: {ind.get('low_24h', 'N/A')}")
+
+    # --- RSI: etat semantique ---
+    rsi = ind.get('rsi_14')
+    if rsi is not None:
+        if rsi > 75:
+            rsi_state = f"RSI 14: {rsi:.1f} - Zone de SURACHAT (pression acheteuse extreme)"
+        elif rsi > 60:
+            rsi_state = f"RSI 14: {rsi:.1f} - Tendance haussiere (momentum positif)"
+        elif rsi > 40:
+            rsi_state = f"RSI 14: {rsi:.1f} - Zone neutre (pas d'extreme)"
+        elif rsi > 25:
+            rsi_state = f"RSI 14: {rsi:.1f} - Tendance baissiere (momentum negatif)"
+        else:
+            rsi_state = f"RSI 14: {rsi:.1f} - Zone de SURVENTE (pression vendeuse extreme)"
+        lines.append(rsi_state)
+
+    # --- MACD: croisement et zone ---
+    macd_line = ind.get('macd_line')
+    macd_signal = ind.get('macd_signal')
+    macd_hist = ind.get('macd_histogram')
+    if macd_line is not None and macd_signal is not None:
+        # Relation MACD vs Signal
+        if macd_line > macd_signal:
+            cross_state = "MACD au-dessus du Signal (momentum haussier)"
+        else:
+            cross_state = "MACD sous le Signal (momentum baissier)"
+        # Zone (positif/negatif)
+        if macd_line > 0:
+            zone = "zone positive"
+        else:
+            zone = "zone negative"
+        # Histogramme: acceleration ou deceleration
+        if macd_hist is not None:
+            if macd_hist > 0:
+                hist_state = "histogramme haussier (acceleration acheteuse)"
+            else:
+                hist_state = "histogramme baissier (acceleration vendeuse)"
+        else:
+            hist_state = ""
+        lines.append(f"MACD: {cross_state} en {zone}, {hist_state}")
+
+    # --- Bollinger Bands: position semantique ---
+    bb_pos = ind.get('bb_position_pct')
+    if bb_pos is not None:
+        if bb_pos > 95:
+            bb_state = f"Prix SUR LA BANDE SUPERIEURE (surf haussier, possible cassure)"
+        elif bb_pos > 70:
+            bb_state = f"Prix dans la MOITIE SUPERIEURE des bandes (pression haussiere)"
+        elif bb_pos > 30:
+            bb_state = f"Prix dans la ZONE MEDIANE des bandes (range)"
+        elif bb_pos > 5:
+            bb_state = f"Prix dans la MOITIE INFERIEURE des bandes (pression baissiere)"
+        else:
+            bb_state = f"Prix SUR LA BANDE INFERIEURE (surf baissier, possible cassure)"
+        lines.append(f"Bollinger: {bb_state}")
+
+    # --- Moving Averages ---
+    sma20 = ind.get('sma_20')
+    sma50 = ind.get('sma_50')
+    current_price = ind.get('current_price')
+    if sma20 is not None and current_price is not None:
+        vs_sma20 = "au-dessus" if current_price > sma20 else "sous"
+        lines.append(f"SMA20: Prix {vs_sma20} la SMA20 ({sma20:.5f})")
+    if sma50 is not None and current_price is not None:
+        vs_sma50 = "au-dessus" if current_price > sma50 else "sous"
+        lines.append(f"SMA50: Prix {vs_sma50} la SMA50 ({sma50:.5f})")
+
+    ema20 = ind.get('ema_20')
+    ema200 = ind.get('ema_200')
+    if ema20 is not None:
+        lines.append(f"EMA20: {ema20:.5f}")
+    if ema200 is not None and current_price is not None:
+        vs_ema200 = "au-dessus" if current_price > ema200 else "sous"
+        lines.append(f"EMA200: Prix {vs_ema200} l'EMA200 ({ema200:.5f})")
+
+    # --- ATR: volatilite ---
+    atr = ind.get('atr_14')
+    if atr is not None and current_price is not None:
+        atr_pct = (atr / current_price) * 100 if current_price else 0
+        if atr_pct > 0.5:
+            atr_state = f"ATR 14: {atr:.5f} - VOLATILITE ELEVEE ({atr_pct:.2f}% du prix)"
+        elif atr_pct > 0.2:
+            atr_state = f"ATR 14: {atr:.5f} - Volatilite moderee ({atr_pct:.2f}% du prix)"
+        else:
+            atr_state = f"ATR 14: {atr:.5f} - Volatilite faible ({atr_pct:.2f}% du prix)"
+        lines.append(atr_state)
+
+    # --- Tendance ---
+    trend_ct = ind.get('trend_short', 'N/A')
+    trend_mt = ind.get('trend_medium', 'N/A')
+    lines.append(f"Tendance CT: {trend_ct}, MT: {trend_mt}")
+
+    # --- Niveaux 24h ---
+    high24 = ind.get('high_24h')
+    low24 = ind.get('low_24h')
+    if high24 is not None and low24 is not None and current_price is not None:
+        pct_from_high = ((high24 - current_price) / current_price * 100) if current_price else 0
+        pct_from_low = ((current_price - low24) / current_price * 100) if current_price else 0
+        lines.append(f"Range 24h: {low24:.5f} - {high24:.5f} (prix a {pct_from_low:.1f}% du bas, {pct_from_high:.1f}% du haut)")
+
     return "\n".join(lines)
 
 

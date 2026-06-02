@@ -1,3 +1,20 @@
+# Todo - Audit v3 : Corrections risk management + filtres + prompts semantiques
+
+**Debut** : 2026-06-02 23:59
+**Fin** : 2026-06-03 00:12
+
+## Taches
+
+- [x] Time Exit: remplacer chronometre 120min par structure de marche (SMA20 + HH/HL)
+- [x] Stops Levels: verifier trade_stops_level avant toute modif SL/TP dans _modify_sl
+- [x] Breakeven: passer de 0.5R a 1.2R (couvre commissions/swaps)
+- [x] Prompts semantiques: convertir MACD/RSI/BB bruts en etats semantiques dans _format_indicators_v2
+- [x] Filtres anti-tendance: conditionner RSI/BB a ADX <= 25 (desactiver si trending)
+- [x] Mettre a jour les tests (118 nouveaux tests, 408 total, 407 pass)
+- [x] Mettre a jour la documentation (ADR-003, regles-gestion-risques.md, ai-module.md)
+
+---
+
 # Todo - Rapport journalier email + analyse DeepSeek V4 Pro
 
 **Debut** : 2026-06-02 21:28
@@ -21,7 +38,7 @@
 # Todo - Backtesteur hybride (RuleEngine + donnees historiques)
 
 **Debut** : 2026-06-02 21:01
-**Fin** : 2026-06-02 21:57
+**Fin** : 2026-06-02 23:19
 
 ## Taches
 

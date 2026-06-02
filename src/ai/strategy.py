@@ -151,23 +151,30 @@ def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
         logger.warning(f"CIRCUIT BREAKER: {consecutive_losses} pertes consecutives - pause 4h")
         _set_circuit_breaker_until(hours=4)
         return False
-    # PROB-8: Filtre RSI/BB - evite les entrees en zone surchetee/survendue
+    # v3.0: Filtres RSI/BB conditionnes au regime de marche
+    # En tendance forte (ADX > 25), le RSI peut rester surachete/survendu pendant des heures
+    # et le prix surfe sur les bandes de Bollinger. On ne bloque PAS ces entrees.
+    # En ranging (ADX <= 25), on applique les filtres mean-reversion.
     indicators = decision.get("indicators", {})
     rsi = indicators.get("rsi_14", 50) if indicators else 50
     bb_pos = indicators.get("bb_position_pct", 50) if indicators else 50
     action = decision.get("action", "")
-    if action == "BUY" and rsi > 75:
-        logger.info(f"Filtre RSI/BB: BUY bloque (RSI={rsi:.1f} > 75 - zone surchetee)")
-        return False
-    if action == "SELL" and rsi < 25:
-        logger.info(f"Filtre RSI/BB: SELL bloque (RSI={rsi:.1f} < 25 - zone survendue)")
-        return False
-    if action == "BUY" and isinstance(bb_pos, (int, float)) and bb_pos > 100:
-        logger.info(f"Filtre RSI/BB: BUY bloque (BB_position={bb_pos:.0f}% > 100 - prix au-dessus bande sup)")
-        return False
-    if action == "SELL" and isinstance(bb_pos, (int, float)) and bb_pos < 0:
-        logger.info(f"Filtre RSI/BB: SELL bloque (BB_position={bb_pos:.0f}% < 0 - prix sous bande inf)")
-        return False
+    adx = indicators.get("adx_14", 20) if indicators else 20
+    if adx is not None and adx <= 25:
+        if action == "BUY" and rsi > 75:
+            logger.info(f"Filtre RSI/BB (ranging): BUY bloque (RSI={rsi:.1f} > 75, ADX={adx:.1f})")
+            return False
+        if action == "SELL" and rsi < 25:
+            logger.info(f"Filtre RSI/BB (ranging): SELL bloque (RSI={rsi:.1f} < 25, ADX={adx:.1f})")
+            return False
+        if action == "BUY" and isinstance(bb_pos, (int, float)) and bb_pos > 100:
+            logger.info(f"Filtre RSI/BB (ranging): BUY bloque (BB_position={bb_pos:.0f}%, ADX={adx:.1f})")
+            return False
+        if action == "SELL" and isinstance(bb_pos, (int, float)) and bb_pos < 0:
+            logger.info(f"Filtre RSI/BB (ranging): SELL bloque (BB_position={bb_pos:.0f}%, ADX={adx:.1f})")
+            return False
+    elif adx is not None and adx > 25:
+        logger.debug(f"Filtres RSI/BB desactives: ADX={adx:.1f} > 25 (marche en tendance)")
     return True
 
 
@@ -260,12 +267,12 @@ def manage_open_positions() -> int:
 
 
 def _apply_breakeven(pos: dict) -> bool:
-    """Deplace le SL au prix d'entree quand le profit >= 1x SL initial."""
+    """Deplace le SL au prix d'entree quand le profit >= 1.2x SL initial.
+    v3.0: seuil a 1.2R pour couvrir commissions/swaps et laisser respirer le trade."""
     entry_price = pos.get("price_open", 0)
     current_sl = pos.get("sl", 0)
     ticket = pos.get("ticket", 0)
     tick = mt5.symbol_info_tick(settings.trading_symbol)
-    # BUG-C: guard sym_info (identique a _apply_trailing_stop)
     sym_info = mt5.symbol_info(settings.trading_symbol)
 
     if tick is None or sym_info is None or entry_price == 0:
@@ -274,16 +281,16 @@ def _apply_breakeven(pos: dict) -> bool:
     if pos.get("type") == mt5.POSITION_TYPE_BUY:
         sl_distance_pips = (entry_price - current_sl) / (10 * sym_info.point) if current_sl else 0
         profit_distance_pips = (tick.bid - entry_price) / (10 * sym_info.point)
-        # PROB-6: Breakeven des que profit >= 50% de la distance SL (plus prudent et protecteur)
-        if profit_distance_pips >= sl_distance_pips * 0.5 and current_sl < entry_price:
+        # v3.0: Breakeven a 1.2R (couvre commissions/swaps + marge de respiration)
+        if profit_distance_pips >= sl_distance_pips * 1.2 and current_sl < entry_price:
             _modify_sl(ticket, entry_price)
             logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a l'entree {entry_price}")
             return True
     else:
         sl_distance_pips = (current_sl - entry_price) / (10 * sym_info.point) if current_sl else 0
         profit_distance_pips = (entry_price - tick.ask) / (10 * sym_info.point)
-        # PROB-6: Breakeven des que profit >= 50% de la distance SL
-        if profit_distance_pips >= sl_distance_pips * 0.5 and current_sl > entry_price:
+        # v3.0: Breakeven a 1.2R
+        if profit_distance_pips >= sl_distance_pips * 1.2 and current_sl > entry_price:
             _modify_sl(ticket, entry_price)
             logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a l'entree {entry_price}")
             return True
@@ -327,37 +334,116 @@ def _apply_trailing_stop(pos: dict) -> bool:
 
 
 def _check_time_exit(pos: dict) -> bool:
-    """Ferme la position si elle stagne en legere perte depuis 2h+ (PROB-5 fix).
-    Logique corrigee: ferme les positions PERDANTES qui stagnent, pas les gagnantes."""
+    """Ferme la position si la structure de marche s'inverse contre le trade.
+    v3.0: Logique basee sur la structure (SMA20 + HH/HL) au lieu d'un chronometre arbitraire.
+    - BUY: ferme si le prix cloture sous SMA20 OU casse la structure de higher lows
+    - SELL: ferme si le prix cloture au-dessus SMA20 OU casse la structure de lower highs
+    - Securite: stagnation totale >4h (quelle que soit la direction)"""
     try:
-        db = get_db()
+        from datetime import datetime as dt
         ticket = pos.get("ticket", 0)
-        row = db.execute(
-            "SELECT opened_at FROM trades WHERE ticket = ?", [ticket]
-        ).fetchone()
-        if row is None:
-            return False
-        from datetime import datetime as dt, timedelta
-        opened = dt.fromisoformat(row[0])
-        age_minutes = (dt.now() - opened).total_seconds() / 60
+        entry_price = pos.get("price_open", 0)
         pnl = pos.get("profit", 0)
-        # Ferme les losers stagnants: ouverts depuis >2h ET en perte >$0.50 mais <$5
-        # (les gros losers qui depassent $5 seront coupes par le SL normal)
-        if age_minutes > 120 and -5.0 < pnl < -0.5:
-            logger.info(f"TIME EXIT: ticket {ticket}, perte stagnante {pnl:.2f}$ depuis {age_minutes:.0f}min")
-            return True
-        # Ferme les positions completement a l'arret depuis >4h quelle que soit la direction
-        if age_minutes > 240 and abs(pnl) < 0.5:
-            logger.info(f"TIME EXIT: ticket {ticket}, stagnation totale {pnl:.2f}$ depuis {age_minutes:.0f}min")
-            return True
-    except Exception:
-        pass
+
+        # Recuperer les indicateurs recents pour juger la structure
+        tick = mt5.symbol_info_tick(settings.trading_symbol)
+        sym_info = mt5.symbol_info(settings.trading_symbol)
+        if tick is None or sym_info is None:
+            return False
+
+        # SMA20: recuperer les 20 dernieres bougies M15
+        rates = mt5.copy_rates_from_pos(settings.trading_symbol, mt5.TIMEFRAME_M15, 0, 20)
+        if rates is None or len(rates) < 20:
+            # Fallback: utiliser le chronometre 4h comme securite
+            db = get_db()
+            row = db.execute("SELECT opened_at FROM trades WHERE ticket = ?", [ticket]).fetchone()
+            if row is None:
+                return False
+            opened = dt.fromisoformat(row[0])
+            age_minutes = (dt.now() - opened).total_seconds() / 60
+            if age_minutes > 240 and abs(pnl) < 0.5:
+                logger.info(f"TIME EXIT (fallback): ticket {ticket}, stagnation {age_minutes:.0f}min")
+                return True
+            return False
+
+        close_prices = [r[4] for r in rates]  # close
+        sma20 = sum(close_prices) / len(close_prices)
+        current_price = tick.bid if pos.get("type") == mt5.POSITION_TYPE_BUY else tick.ask
+
+        if pos.get("type") == mt5.POSITION_TYPE_BUY:
+            # Structure haussiere: le prix doit rester au-dessus SMA20
+            if current_price < sma20:
+                logger.info(f"TIME EXIT: ticket {ticket}, BUY casse SMA20 ({current_price:.5f} < {sma20:.5f})")
+                return True
+            # Verifier si la structure HH/HL est cassee (dernier low > low precedent?)
+            highs = [r[2] for r in rates]
+            lows = [r[3] for r in rates]
+            # Structure HL cassee si le dernier swing low est plus bas que le precedent
+            recent_low = min(lows[-5:])
+            prior_low = min(lows[-10:-5])
+            if recent_low < prior_low:
+                logger.info(f"TIME EXIT: ticket {ticket}, BUY structure HL cassee (recent low {recent_low:.5f} < prior {prior_low:.5f})")
+                return True
+        else:
+            # Structure baissiere: le prix doit rester sous SMA20
+            if current_price > sma20:
+                logger.info(f"TIME EXIT: ticket {ticket}, SELL casse SMA20 ({current_price:.5f} > {sma20:.5f})")
+                return True
+            # Verifier si la structure LH est cassee
+            highs_arr = [r[2] for r in rates]
+            lows_arr = [r[3] for r in rates]
+            recent_high = max(highs_arr[-5:])
+            prior_high = max(highs_arr[-10:-5])
+            if recent_high > prior_high:
+                logger.info(f"TIME EXIT: ticket {ticket}, SELL structure LH cassee (recent high {recent_high:.5f} > prior {prior_high:.5f})")
+                return True
+
+        # Securite: stagnation totale >4h
+        db = get_db()
+        row = db.execute("SELECT opened_at FROM trades WHERE ticket = ?", [ticket]).fetchone()
+        if row is not None:
+            opened = dt.fromisoformat(row[0])
+            age_minutes = (dt.now() - opened).total_seconds() / 60
+            if age_minutes > 240 and abs(pnl) < 0.5:
+                logger.info(f"TIME EXIT: ticket {ticket}, stagnation totale {age_minutes:.0f}min")
+                return True
+
+    except Exception as e:
+        logger.warning(f"TIME EXIT erreur: {e}")
     return False
 
 
 def _modify_sl(ticket: int, new_sl: float) -> None:
-    """Modifie le SL d'une position ouverte."""
+    """Modifie le SL d'une position ouverte.
+    v3.0: Verifie trade_stops_level du broker avant modification."""
     sym = settings.trading_symbol
+    sym_info = mt5.symbol_info(sym)
+
+    # Verifier la distance minimale SL autorisee par le broker
+    if sym_info is not None:
+        tick = mt5.symbol_info_tick(sym)
+        if tick is not None:
+            stops_level = sym_info.trade_stops_level * sym_info.point
+            # Pour un SL, la distance minimale depuis le prix actuel
+            pos = mt5.positions_get(ticket=ticket)
+            if pos and len(pos) > 0:
+                if pos[0].type == mt5.POSITION_TYPE_BUY:
+                    distance_from_bid = tick.bid - new_sl
+                    if distance_from_bid < stops_level and new_sl < tick.bid:
+                        logger.warning(
+                            f"SL rejete: distance {distance_from_bid:.5f} < stops_level {stops_level:.5f} "
+                            f"(broker min). Ticket {ticket}, SL demande={new_sl}, bid={tick.bid}"
+                        )
+                        return
+                else:
+                    distance_from_ask = new_sl - tick.ask
+                    if distance_from_ask < stops_level and new_sl > tick.ask:
+                        logger.warning(
+                            f"SL rejete: distance {distance_from_ask:.5f} < stops_level {stops_level:.5f} "
+                            f"(broker min). Ticket {ticket}, SL demande={new_sl}, ask={tick.ask}"
+                        )
+                        return
+
     request = {
         "action": mt5.TRADE_ACTION_SLTP,
         "symbol": sym,
