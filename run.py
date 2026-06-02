@@ -43,8 +43,8 @@ def show_banner():
 
 
 def show_stats():
-    """Affiche les statistiques."""
-    stats = get_statistics()
+    """Affiche les statistiques (filtrees par symbole courant - INC-B fix)."""
+    stats = get_statistics(symbol=settings.trading_symbol)
     console = Console()
     table = Table(title=f"Statistiques de trading - {settings.trading_symbol}")
     table.add_column("Metrique", style="cyan")
