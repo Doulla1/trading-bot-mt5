@@ -5,28 +5,29 @@ import json
 import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
 from loguru import logger
 
 from src.config import settings
 
-_db: Optional[sqlite3.Connection] = None
+_dbs: dict[str, sqlite3.Connection] = {}
 _db_lock = threading.Lock()
 
 
 def get_db() -> sqlite3.Connection:
-    """Retourne la connexion SQLite (singleton thread-safe, MED-01)."""
-    global _db
-    if _db is None:
+    """Retourne la connexion SQLite pour le symbole courant (BUG-1: isolation par symbole).
+    Utilise un dict keyed par db_path pour que chaque symbole ecrive dans sa propre DB."""
+    path = str(settings.db_path)
+    if path not in _dbs:
         with _db_lock:
-            if _db is None:
-                _db = sqlite3.connect(str(settings.db_path), check_same_thread=False)
-                _db.row_factory = sqlite3.Row
-                _db.execute("PRAGMA journal_mode=WAL")
-                _db.execute("PRAGMA foreign_keys=ON")
-                _init_tables(_db)
-                logger.info(f"Base de donnees initialisee: {settings.db_path}")
-    return _db
+            if path not in _dbs:
+                conn = sqlite3.connect(path, check_same_thread=False)
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
+                _init_tables(conn)
+                _dbs[path] = conn
+                logger.info(f"Base de donnees initialisee: {path}")
+    return _dbs[path]
 
 
 def _init_tables(db: sqlite3.Connection) -> None:
@@ -116,10 +117,16 @@ def log_trade_close(ticket, close_price, profit) -> None:
     logger.info(f"Trade {ticket} ferme dans la DB - Profit: {profit:.2f}")
 
 
-def get_recent_trades(limit=20) -> list:
-    """Retourne les derniers trades."""
+def get_recent_trades(limit=20, symbol: str | None = None) -> list:
+    """Retourne les derniers trades, filtres par symbole si fourni (BUG-get_recent_trades)."""
     db = get_db()
-    rows = db.execute("SELECT * FROM trades ORDER BY opened_at DESC LIMIT ?", [limit]).fetchall()
+    if symbol:
+        rows = db.execute(
+            "SELECT * FROM trades WHERE symbol = ? ORDER BY opened_at DESC LIMIT ?",
+            [symbol, limit]
+        ).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM trades ORDER BY opened_at DESC LIMIT ?", [limit]).fetchall()
     return [dict(r) for r in rows]
 
 

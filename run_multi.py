@@ -8,7 +8,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 from rich.console import Console
 from rich.table import Table
@@ -45,14 +45,24 @@ def _should_run(cfg: dict, current_round: int) -> bool:
 
 
 def _get_session_context() -> dict:
-    now = datetime.now()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)  # BUG-4: utilise UTC
     hour = now.hour
-    session = "Asian" if 2 <= hour < 8 else "London" if 8 <= hour < 15 else "New_York" if 15 <= hour < 21 else "Low_liquidity"
+    # Bornes UTC correctes: Asie 22-08, Londres 08-16, New York 13-22
+    if hour >= 22 or hour < 8:
+        session = "Asian"
+    elif 8 <= hour < 13:
+        session = "London"
+    elif 13 <= hour < 17:
+        session = "London_New_York_overlap"
+    elif 17 <= hour < 22:
+        session = "New_York"
+    else:
+        session = "Low_liquidity"
     return {"datetime": now.strftime("%Y-%m-%d %H:%M UTC"), "session": session, "day_of_week": now.strftime("%A"), "hour": hour}
 
 
 def _reconcile_closed_positions(sym: str) -> None:
-    """Reconciliation des trades fermes."""
+    """Reconciliation des trades fermes (BUG-2: utiliser history_deals_get(position=) et chercher le deal de sortie)."""
     import MetaTrader5 as mt5
     try:
         db = get_db()
@@ -62,9 +72,13 @@ def _reconcile_closed_positions(sym: str) -> None:
         for row in open_tickets:
             ticket = row[0]
             if mt5.positions_get(ticket=ticket) is None or len(mt5.positions_get(ticket=ticket)) == 0:
-                deals = mt5.history_deals_get(ticket=ticket)
-                if deals and len(deals) > 0:
-                    log_trade_close(ticket, deals[-1].price, deals[-1].profit)
+                # Position fermee - recuperer le deal de SORTIE (entry=1 = OUT)
+                deals = mt5.history_deals_get(position=ticket)
+                close_deal = None
+                if deals:
+                    close_deal = next((d for d in deals if d.entry == 1), None)
+                if close_deal:
+                    log_trade_close(ticket, close_deal.price, close_deal.profit)
                 else:
                     log_trade_close(ticket, 0.0, 0.0)
     except Exception:
@@ -72,9 +86,9 @@ def _reconcile_closed_positions(sym: str) -> None:
 
 
 def _has_high_impact_news_soon(events: list) -> bool:
-    """Blocage news HIGH <30 min."""
+    """Blocage news HIGH <30 min (BUG-4: utilise UTC pour comparer avec les events UTC)."""
     try:
-        now = datetime.now()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC
         for ev in events:
             if ev.get("impact") != "high":
                 continue
@@ -165,7 +179,7 @@ def run_symbol(cfg: dict) -> None:
     # DeepSeek
     open_positions = executor.get_open_positions(sym)
     account_info = bridge.get_account_info() or {}
-    trade_history = get_recent_trades(limit=20)
+    trade_history = get_recent_trades(limit=20, symbol=sym)
     perf_stats = get_statistics()
     session_ctx = _get_session_context()
 
@@ -177,6 +191,8 @@ def run_symbol(cfg: dict) -> None:
     )
 
     if decision:
+        # Enrichir la decision avec les indicateurs pour les filtres (PROB-8)
+        decision["indicators"] = ind_data
         strat_result = execute_decision(decision)
         was_exec = strat_result.trade_result is not None and strat_result.trade_result.success
         log_analysis(sym, tf, decision, str(chart_path) if chart_path else "",

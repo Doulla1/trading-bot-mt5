@@ -1,3 +1,41 @@
+# Todo - Corrections post-audit performance (Bugs P0/P1/P2)
+
+**Debut** : 2026-06-02 20:03
+**Fin** : 2026-06-02 20:08
+
+## Taches
+
+- [x] BUG-1 (P0): Isolation DB - get_db() singleton multi-symboles -> dict keyed par path
+- [x] BUG-2 (P0): Reconciliation P&L - history_deals_get(ticket=) incorrect -> history_deals_get(position=)
+- [x] PROB-5 (P0): Time exit inversee - ferme les winners au lieu des losers perdants
+- [x] BUG-4 (P1): Timezone run_multi.py - datetime.now() -> datetime.utcnow() + session boundaries
+- [x] PROB-6 (P1): Breakeven trop tard - seuil 100% SL -> 50% SL
+- [x] PROB-8 (P1): Filtre RSI/BB overbought/oversold sur entrees BUY/SELL
+- [x] BUG-3 (P2): OCR ancrage prix actuel + detail="high" + max_tokens=500
+- [x] get_recent_trades: filtrer par symbole pour isoler contexte DeepSeek
+- [x] Mettre a jour les tests (52 tests, tout vert)
+- [x] xacp + relance programme
+
+---
+
+# Todo - Scraper Investing.com avec Playwright
+
+**Debut** : 2026-06-02 00:52
+**Fin** : 2026-06-02 00:58
+
+## Taches
+
+- [x] Creer `src/data/investing_calendar.py` avec Playwright
+- [x] Extraire les evenements economiques de Investing.com
+- [x] Implementer le mode headless avec anti-detection
+- [x] Mapper les devises (JP -> JPY, AU -> AUD, etc.)
+- [x] Integrer dans `src/data/calendar.py` (Investing en principal, cascade de sources)
+- [x] Installer les dependances (playwright, browser chromium)
+- [x] Mettre a jour les tests (31 tests, tout vert)
+- [x] Mettre a jour la documentation
+
+---
+
 # Todo - Corrections post-audit (CRITICAL + HIGH)
 
 **Debut** : 2026-06-01 17:04

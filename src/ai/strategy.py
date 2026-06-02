@@ -122,7 +122,7 @@ def _check_pre_trade_guards(_action: str) -> StrategyResult | None:
 
 
 def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
-    """Applique les filtres pre-trade: confiance, max positions, spread, circuit breaker."""
+    """Applique les filtres pre-trade: confiance, max positions, spread, circuit breaker, RSI/BB."""
     confidence = decision["confidence"]
     if confidence < settings.min_confidence_threshold:
         logger.info(f"Confiance {confidence}% < seuil {settings.min_confidence_threshold}%")
@@ -141,6 +141,23 @@ def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
     if consecutive_losses >= 4:
         logger.warning(f"CIRCUIT BREAKER: {consecutive_losses} pertes consecutives - pause 4h")
         _set_circuit_breaker_until(hours=4)
+        return False
+    # PROB-8: Filtre RSI/BB - evite les entrees en zone surchetee/survendue
+    indicators = decision.get("indicators", {})
+    rsi = indicators.get("rsi", 50) if indicators else 50
+    bb_pos = indicators.get("bb_position", 50) if indicators else 50
+    action = decision.get("action", "")
+    if action == "BUY" and rsi > 75:
+        logger.info(f"Filtre RSI/BB: BUY bloque (RSI={rsi:.1f} > 75 - zone surchetee)")
+        return False
+    if action == "SELL" and rsi < 25:
+        logger.info(f"Filtre RSI/BB: SELL bloque (RSI={rsi:.1f} < 25 - zone survendue)")
+        return False
+    if action == "BUY" and isinstance(bb_pos, (int, float)) and bb_pos > 100:
+        logger.info(f"Filtre RSI/BB: BUY bloque (BB_position={bb_pos:.0f}% > 100 - prix au-dessus bande sup)")
+        return False
+    if action == "SELL" and isinstance(bb_pos, (int, float)) and bb_pos < 0:
+        logger.info(f"Filtre RSI/BB: SELL bloque (BB_position={bb_pos:.0f}% < 0 - prix sous bande inf)")
         return False
     return True
 
@@ -246,14 +263,16 @@ def _apply_breakeven(pos: dict) -> bool:
     if pos.get("type") == mt5.POSITION_TYPE_BUY:
         sl_distance_pips = (entry_price - current_sl) / (10 * mt5.symbol_info(settings.trading_symbol).point) if current_sl else 0
         profit_distance_pips = (tick.bid - entry_price) / (10 * mt5.symbol_info(settings.trading_symbol).point)
-        if profit_distance_pips >= sl_distance_pips and current_sl < entry_price:
+        # PROB-6: Breakeven des que profit >= 50% de la distance SL (plus prudent et protecteur)
+        if profit_distance_pips >= sl_distance_pips * 0.5 and current_sl < entry_price:
             _modify_sl(ticket, entry_price)
             logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a l'entree {entry_price}")
             return True
     else:
         sl_distance_pips = (current_sl - entry_price) / (10 * mt5.symbol_info(settings.trading_symbol).point) if current_sl else 0
         profit_distance_pips = (entry_price - tick.ask) / (10 * mt5.symbol_info(settings.trading_symbol).point)
-        if profit_distance_pips >= sl_distance_pips and current_sl > entry_price:
+        # PROB-6: Breakeven des que profit >= 50% de la distance SL
+        if profit_distance_pips >= sl_distance_pips * 0.5 and current_sl > entry_price:
             _modify_sl(ticket, entry_price)
             logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a l'entree {entry_price}")
             return True
@@ -297,7 +316,8 @@ def _apply_trailing_stop(pos: dict) -> bool:
 
 
 def _check_time_exit(pos: dict) -> bool:
-    """Ferme la position si elle stagne depuis 3+ cycles (45 min M15)."""
+    """Ferme la position si elle stagne en legere perte depuis 2h+ (PROB-5 fix).
+    Logique corrigee: ferme les positions PERDANTES qui stagnent, pas les gagnantes."""
     try:
         db = get_db()
         ticket = pos.get("ticket", 0)
@@ -308,12 +328,17 @@ def _check_time_exit(pos: dict) -> bool:
             return False
         from datetime import datetime as dt, timedelta
         opened = dt.fromisoformat(row[0])
-        # 3 cycles M15 = 45 minutes
-        if dt.now() - opened > timedelta(minutes=45):
-            pnl = pos.get("profit", 0)
-            if abs(pnl) < 1.0:  # Stagne (moins de 1 EUR de P&L)
-                logger.info(f"TIME EXIT: ticket {ticket}, stagne depuis >45 min, P&L={pnl:.2f}")
-                return True
+        age_minutes = (dt.now() - opened).total_seconds() / 60
+        pnl = pos.get("profit", 0)
+        # Ferme les losers stagnants: ouverts depuis >2h ET en perte >$0.50 mais <$5
+        # (les gros losers qui depassent $5 seront coupes par le SL normal)
+        if age_minutes > 120 and -5.0 < pnl < -0.5:
+            logger.info(f"TIME EXIT: ticket {ticket}, perte stagnante {pnl:.2f}$ depuis {age_minutes:.0f}min")
+            return True
+        # Ferme les positions completement a l'arret depuis >4h quelle que soit la direction
+        if age_minutes > 240 and abs(pnl) < 0.5:
+            logger.info(f"TIME EXIT: ticket {ticket}, stagnation totale {pnl:.2f}$ depuis {age_minutes:.0f}min")
+            return True
     except Exception:
         pass
     return False
