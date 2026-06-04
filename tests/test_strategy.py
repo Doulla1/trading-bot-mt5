@@ -121,19 +121,18 @@ class TestCheckTimeExit:
     # --- BUY: prix au-dessus SMA20, structure intacte ---
 
     def test_buy_price_above_sma20_structure_intact_no_exit(self):
-        """BUY avec prix au-dessus SMA20 et structure HL intacte -> pas d'exit."""
+        """BUY avec prix au-dessus SMA20 et structure 20-bar intacte -> pas d'exit."""
         import src.ai.strategy as strat
 
         pos = _make_pos_buy(entry=1.0850, sl=1.0820)
         sym_info = _make_sym_info()
         tick = _make_tick(bid=1.0860, ask=1.0861)
 
-        # SMA20 ~ 1.0830, bid=1.0860 > SMA20, structure HL intacte
+        # SMA20 ~ 1.0830, bid=1.0860 > SMA20
         closes = [1.0830] * 20
         highs = [1.0840] * 20
         lows = [1.0820] * 20
-        # HL intact: recent low > prior low
-        lows[-1] = 1.0835  # recent low plus haut
+        # lowest 20-bar = 1.0820, bid=1.0860 > 1.0820 -> structure intacte
         rates = _make_rates(closes, highs, lows)
 
         with patch("src.ai.strategy.mt5.symbol_info_tick", return_value=tick), \
@@ -150,19 +149,16 @@ class TestCheckTimeExit:
     # --- BUY: structure HL cassee ---
 
     def test_buy_hl_structure_broken_triggers_exit(self):
-        """BUY avec structure HL cassee (recent low < prior low) -> exit."""
+        """BUY avec casse du lowest 20-bar -> exit."""
         import src.ai.strategy as strat
 
         pos = _make_pos_buy(entry=1.0850, sl=1.0820)
         sym_info = _make_sym_info()
-        tick = _make_tick(bid=1.0865, ask=1.0866)  # prix au-dessus SMA20
+        tick = _make_tick(bid=1.0810, ask=1.0811)  # bid < lowest 20-bar
 
-        # SMA20 ~ 1.0830, bid > SMA20 mais HL cassee
         closes = [1.0830] * 20
         highs = [1.0845] * 20
-        lows = [1.0820] * 20
-        # HL cassee: recent low plus bas que prior low
-        lows[-1] = 1.0810  # recent low plus bas -> casse
+        lows = [1.0820] * 20  # lowest = 1.0820
         rates = _make_rates(closes, highs, lows)
 
         with patch("src.ai.strategy.mt5.symbol_info_tick", return_value=tick), \
@@ -203,18 +199,16 @@ class TestCheckTimeExit:
     # --- SELL: structure LH cassee ---
 
     def test_sell_lh_structure_broken_triggers_exit(self):
-        """SELL avec structure LH cassee (recent high > prior high) -> exit."""
+        """SELL avec casse du highest 20-bar -> exit."""
         import src.ai.strategy as strat
 
         pos = _make_pos_sell(entry=1.0850, sl=1.0880)
         sym_info = _make_sym_info()
-        tick = _make_tick(bid=1.0830, ask=1.0831)  # ask sous SMA20
+        tick = _make_tick(bid=1.0830, ask=1.0885)  # ask > highest 20-bar
 
-        closes = [1.0845] * 20  # SMA20=1.0845, ask < SMA20, mais LH cassee
-        highs = [1.0860] * 20
+        closes = [1.0890] * 20  # SMA20=1.0890, ask < SMA20 (1.0885 < 1.0890)
+        highs = [1.0880] * 20   # highest 20-bar = 1.0880
         lows = [1.0830] * 20
-        # LH cassee: recent high > prior high
-        highs[-1] = 1.0875
         rates = _make_rates(closes, highs, lows)
 
         with patch("src.ai.strategy.mt5.symbol_info_tick", return_value=tick), \
@@ -380,7 +374,8 @@ class TestCheckTimeExit:
         closes = [1.0830] * 20
         lows = [1.0820] * 20
         highs = [1.0840] * 20
-        lows[-1] = 1.0835
+        # SMA20=1.0830, bid=1.0860 > 1.0830
+        # lowest 20-bar=1.0820, bid=1.0860 > 1.0820 -> tout est bon
         rates = _make_rates(closes, highs, lows)
 
         with patch("src.ai.strategy.mt5.symbol_info_tick", return_value=tick), \

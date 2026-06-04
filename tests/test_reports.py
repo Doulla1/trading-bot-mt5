@@ -560,6 +560,13 @@ class TestGenerateDailyReport:
                 profit REAL, confidence INTEGER, stop_loss REAL, take_profit REAL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS analysis_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                symbol TEXT
+            )
+        """)
         for t in sample_trades:
             conn.execute(
                 "INSERT INTO trades VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -673,12 +680,12 @@ class TestAnalyzeDailyResults:
 
     def test_missing_api_key_returns_fallback(self, monkeypatch, sample_stats, sample_trades):
         """Cle API manquante -> message de fallback."""
-        monkeypatch.setattr("src.reports.analyzer.settings.deepseek_api_key", "")
+        monkeypatch.setattr("src.reports.analyzer.settings.ai_api_key", "")
 
         with patch("src.reports.analyzer.OpenAI") as mock_openai:
             result = analyze_daily_results(sample_stats, sample_trades, "")
 
-        assert "Analyse DeepSeek non disponible" in result
+        assert "Analyse IA non disponible" in result
         mock_openai.assert_not_called()
 
     def test_api_error_returns_error_message(self, monkeypatch, sample_stats, sample_trades):
