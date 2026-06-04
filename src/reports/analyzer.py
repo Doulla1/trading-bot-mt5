@@ -63,9 +63,9 @@ def analyze_daily_results(stats: dict, trades: list, symbols_detail: str) -> str
     Returns:
         Texte d'analyse en francais, ou message d'erreur si l'analyse echoue.
     """
-    if not settings.deepseek_api_key:
-        logger.warning("Pas de cle DeepSeek - analyse IA indisponible")
-        return "_Analyse DeepSeek non disponible (cle API manquante)._"
+    if not settings.ai_api_key_resolved:
+        logger.warning("Pas de cle API - analyse IA indisponible")
+        return "_Analyse IA non disponible (cle API manquante)._"
 
     # Formater les trades pour le prompt
     trades_lines = []
@@ -93,16 +93,16 @@ def analyze_daily_results(stats: dict, trades: list, symbols_detail: str) -> str
         trades_detail=trades_detail,
     )
 
-    logger.info("Envoi analyse quotidienne a DeepSeek V4 Pro...")
+    logger.info(f"Envoi analyse quotidienne a {settings.ai_provider}/{settings.ai_model}...")
 
     try:
         client = OpenAI(
-            api_key=settings.deepseek_api_key,
-            base_url="https://api.deepseek.com/v1",
+            api_key=settings.ai_api_key_resolved,
+            base_url=settings.ai_base_url,
         )
 
         response = client.chat.completions.create(
-            model="deepseek-v4-pro",
+            model=settings.ai_model,
             messages=[
                 {"role": "system", "content": "Tu es un analyste quantitatif expert. Reponds toujours en francais."},
                 {"role": "user", "content": prompt},
@@ -112,12 +112,12 @@ def analyze_daily_results(stats: dict, trades: list, symbols_detail: str) -> str
         )
 
         analysis = response.choices[0].message.content or ""
-        logger.info(f"Analyse DeepSeek recue ({len(analysis)} caracteres)")
+        logger.info(f"Analyse {settings.ai_provider} recue ({len(analysis)} caracteres)")
 
         if not analysis.strip():
-            logger.warning("DeepSeek a retourne une reponse vide - second essai avec temperature plus elevee")
+            logger.warning(f"{settings.ai_provider} a retourne une reponse vide - second essai avec temperature plus elevee")
             response = client.chat.completions.create(
-                model="deepseek-v4-pro",
+                model=settings.ai_model,
                 messages=[
                     {"role": "system", "content": "Tu es un analyste quantitatif expert. Reponds toujours en francais."},
                     {"role": "user", "content": prompt},

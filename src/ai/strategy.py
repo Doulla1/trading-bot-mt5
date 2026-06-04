@@ -1,4 +1,7 @@
-"""Moteur de strategie : combine IA, indicateurs et gestion des risques."""
+"""Moteur de strategie : combine IA, indicateurs et gestion des risques.
+
+v4.0: SL/TP bases sur l'ATR, TIME EXIT corrige (20-bar break),
+      cooldown post TIME EXIT, configuration par symbole."""
 
 import MetaTrader5 as mt5
 from loguru import logger
@@ -12,6 +15,94 @@ from src.mt5.executor import (
     get_open_positions, count_open_positions, TradeResult,
 )
 from src.data.database import get_db, log_trade_close
+
+# ============================================================
+# Configuration SL/TP par symbole basee sur l'ATR (v4.0)
+# atr_mult : multiplicateur de l'ATR (en pips) pour le SL
+# min_sl   : SL minimum absolu en pips
+# min_tp   : TP minimum absolu en pips
+# tp_ratio : ratio TP/SL (TP = SL * tp_ratio)
+# ============================================================
+_ATR_SL_CONFIG: dict[str, dict] = {
+    "XAUUSD": {"atr_mult": 0.5, "min_sl": 150, "min_tp": 300, "tp_ratio": 2.0},
+    "EURUSD": {"atr_mult": 1.5, "min_sl": 15,  "min_tp": 30,  "tp_ratio": 2.0},
+    "GBPUSD": {"atr_mult": 1.5, "min_sl": 18,  "min_tp": 36,  "tp_ratio": 2.0},
+    "AUDUSD": {"atr_mult": 1.5, "min_sl": 15,  "min_tp": 30,  "tp_ratio": 2.0},
+    "USDJPY": {"atr_mult": 1.5, "min_sl": 20,  "min_tp": 40,  "tp_ratio": 2.0},
+    "USDCHF": {"atr_mult": 1.5, "min_sl": 15,  "min_tp": 30,  "tp_ratio": 2.0},
+}
+
+# Duree du cooldown apres un TIME EXIT (en minutes)
+_COOLDOWN_MINUTES: int = 30
+
+
+def _atr_to_pips(atr_value: float, point: float) -> float:
+    """Convertit la valeur ATR brute (unites de prix) en pips.
+
+    Ex: EURUSD ATR=0.00105, point=0.00001 -> 10.5 pips
+        XAUUSD ATR=45.0, point=0.01 -> 450 pips"""
+    if atr_value is None or point == 0:
+        return 0.0
+    return atr_value / (10.0 * point)
+
+
+def _get_atr_based_sl_tp(symbol: str, indicators: dict, deepseek_sl: int, deepseek_tp: int) -> tuple[int, int]:
+    """Calcule le SL et TP bases sur l'ATR, en respectant les minimums par symbole.
+
+    Retourne (sl_pips, tp_pips). Utilise toujours max(deepseek, atr_based)
+    pour que DeepSeek puisse elargir mais jamais reduire en dessous du minimum ATR."""
+    cfg = _ATR_SL_CONFIG.get(symbol, _ATR_SL_CONFIG["EURUSD"])
+    atr_value = indicators.get("atr_14") if indicators else None
+    sym_info = mt5.symbol_info(symbol)
+    point = sym_info.point if sym_info else 0.00001
+
+    atr_pips = _atr_to_pips(atr_value, point) if atr_value else 0.0
+    atr_based_sl = max(cfg["min_sl"], int(atr_pips * cfg["atr_mult"])) if atr_pips > 0 else cfg["min_sl"]
+
+    # SL final: le plus large entre DeepSeek et ATR
+    sl_final = max(deepseek_sl, atr_based_sl)
+
+    # TP final: max(deepseek_tp, sl_final * tp_ratio, min_tp)
+    tp_min = max(cfg["min_tp"], int(sl_final * cfg["tp_ratio"]))
+    tp_final = max(deepseek_tp, tp_min)
+
+    if sl_final != deepseek_sl or tp_final != deepseek_tp:
+        logger.info(
+            f"SL/TP ajustes ATR pour {symbol}: DeepSeek SL={deepseek_sl}/TP={deepseek_tp} -> "
+            f"ATR SL={sl_final}/TP={tp_final} (ATR={atr_pips:.0f} pips, min_sl={cfg['min_sl']})"
+        )
+
+    return sl_final, tp_final
+
+
+def _set_cooldown_after_exit(symbol: str, direction: str) -> None:
+    """Active un cooldown de _COOLDOWN_MINUTES minutes apres un TIME EXIT.
+    Empeche de re-entrer dans la meme direction trop rapidement."""
+    try:
+        db = get_db()
+        from datetime import datetime, timedelta
+        until = (datetime.now() + timedelta(minutes=_COOLDOWN_MINUTES)).isoformat()
+        key = f"cooldown_{symbol}_{direction}"
+        db.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", [key, until])
+        db.commit()
+        logger.info(f"COOLDOWN actif pour {symbol} {direction} jusqu'a {until[:16]}")
+    except Exception:
+        pass
+
+
+def _is_cooldown_active(symbol: str, direction: str) -> bool:
+    """Verifie si un cooldown est actif pour ce symbole et cette direction."""
+    try:
+        db = get_db()
+        key = f"cooldown_{symbol}_{direction}"
+        row = db.execute("SELECT value FROM bot_state WHERE key = ?", [key]).fetchone()
+        if row is None:
+            return False
+        from datetime import datetime
+        until = datetime.fromisoformat(row[0])
+        return datetime.now() < until
+    except Exception:
+        return False
 
 
 @dataclass
@@ -75,10 +166,14 @@ def execute_decision(decision: dict) -> StrategyResult:
         # Aucune position: filtrer et ouvrir si OK
         if not _passes_trade_filters(decision, symbol_info):
             return result
-        # ... reste du code existant ...
 
-        stop_loss_pips = decision["stop_loss_pips"]
-        take_profit_pips = decision["take_profit_pips"]
+        # v4.0: Ajuster SL/TP selon l'ATR du symbole
+        indicators = decision.get("indicators", {})
+        raw_sl = decision["stop_loss_pips"]
+        raw_tp = decision["take_profit_pips"]
+        stop_loss_pips, take_profit_pips = _get_atr_based_sl_tp(
+            sym, indicators, raw_sl, raw_tp
+        )
         volume = calculate_position_size(balance, stop_loss_pips, symbol_info)
         point = symbol_info.get("point", 0.00001)
         digits = symbol_info.get("digits", 5)
@@ -142,6 +237,11 @@ def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
     spread = symbol_info.get("spread", 999)
     if spread > 30:
         logger.warning(f"Spread trop eleve: {spread} points > 30 max")
+        return False
+    # v4.0: Verifier le cooldown post TIME EXIT
+    action = decision.get("action", "")
+    if action in ("BUY", "SELL") and _is_cooldown_active(settings.trading_symbol, action):
+        logger.info(f"Cooldown actif pour {settings.trading_symbol} {action} - pas d'execution")
         return False
     if _circuit_breaker_active():
         logger.info("Circuit breaker actif - pas d'execution")
@@ -252,7 +352,8 @@ def _circuit_breaker_active() -> bool:
 
 def manage_open_positions() -> int:
     """Applique breakeven, trailing stop, time exit aux positions ouvertes.
-    Appele au debut de chaque cycle. Retourne le nombre de modifications."""
+    Appele au debut de chaque cycle. Retourne le nombre de modifications.
+    v4.0: Active un cooldown apres TIME EXIT pour eviter le re-entry immediat."""
     sym = settings.trading_symbol
     modifications = 0
     for pos in get_open_positions(sym):
@@ -262,6 +363,9 @@ def manage_open_positions() -> int:
             modifications += 1
         if _check_time_exit(pos):
             close_position(pos["ticket"], sym)
+            # v4.0: Cooldown pour eviter le re-entry immediat dans la meme direction
+            direction = "BUY" if pos.get("type") == mt5.POSITION_TYPE_BUY else "SELL"
+            _set_cooldown_after_exit(sym, direction)
             modifications += 1
     return modifications
 
@@ -335,26 +439,28 @@ def _apply_trailing_stop(pos: dict) -> bool:
 
 def _check_time_exit(pos: dict) -> bool:
     """Ferme la position si la structure de marche s'inverse contre le trade.
-    v3.0: Logique basee sur la structure (SMA20 + HH/HL) au lieu d'un chronometre arbitraire.
-    - BUY: ferme si le prix cloture sous SMA20 OU casse la structure de higher lows
-    - SELL: ferme si le prix cloture au-dessus SMA20 OU casse la structure de lower highs
-    - Securite: stagnation totale >4h (quelle que soit la direction)"""
+
+    v4.0: Structure break base sur le 20-bar high/low (pas de fenetres glissantes
+    qui creent des swings fantomes).
+    - BUY: ferme si prix < SMA20 OU prix casse le lowest 20-bar
+    - SELL: ferme si prix > SMA20 OU prix casse le highest 20-bar
+    - Securite: stagnation totale >4h"""
     try:
         from datetime import datetime as dt
         ticket = pos.get("ticket", 0)
-        entry_price = pos.get("price_open", 0)
         pnl = pos.get("profit", 0)
 
-        # Recuperer les indicateurs recents pour juger la structure
         tick = mt5.symbol_info_tick(settings.trading_symbol)
         sym_info = mt5.symbol_info(settings.trading_symbol)
         if tick is None or sym_info is None:
             return False
 
-        # SMA20: recuperer les 20 dernieres bougies M15
-        rates = mt5.copy_rates_from_pos(settings.trading_symbol, mt5.TIMEFRAME_M15, 0, 20)
+        # Recuperer les 20 dernieres bougies (timeframe du symbole)
+        tf_map = {"M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1}
+        timeframe = tf_map.get(settings.trading_timeframe, mt5.TIMEFRAME_M15)
+        rates = mt5.copy_rates_from_pos(settings.trading_symbol, timeframe, 0, 20)
         if rates is None or len(rates) < 20:
-            # Fallback: utiliser le chronometre 4h comme securite
+            # Fallback: chronometre 4h
             db = get_db()
             row = db.execute("SELECT opened_at FROM trades WHERE ticket = ?", [ticket]).fetchone()
             if row is None:
@@ -366,36 +472,31 @@ def _check_time_exit(pos: dict) -> bool:
                 return True
             return False
 
-        close_prices = [r[4] for r in rates]  # close
+        close_prices = [r[4] for r in rates]
+        highs = [r[2] for r in rates]
+        lows = [r[3] for r in rates]
         sma20 = sum(close_prices) / len(close_prices)
         current_price = tick.bid if pos.get("type") == mt5.POSITION_TYPE_BUY else tick.ask
 
         if pos.get("type") == mt5.POSITION_TYPE_BUY:
-            # Structure haussiere: le prix doit rester au-dessus SMA20
+            # BUY: sortir si le prix passe sous SMA20
             if current_price < sma20:
                 logger.info(f"TIME EXIT: ticket {ticket}, BUY casse SMA20 ({current_price:.5f} < {sma20:.5f})")
                 return True
-            # Verifier si la structure HH/HL est cassee (dernier low > low precedent?)
-            highs = [r[2] for r in rates]
-            lows = [r[3] for r in rates]
-            # Structure HL cassee si le dernier swing low est plus bas que le precedent
-            recent_low = min(lows[-5:])
-            prior_low = min(lows[-10:-5])
-            if recent_low < prior_low:
-                logger.info(f"TIME EXIT: ticket {ticket}, BUY structure HL cassee (recent low {recent_low:.5f} < prior {prior_low:.5f})")
+            # Structure break: prix casse le plus bas des 20 dernieres bougies
+            lowest_20 = min(lows)
+            if current_price < lowest_20:
+                logger.info(f"TIME EXIT: ticket {ticket}, BUY casse lowest 20-bar ({current_price:.5f} < {lowest_20:.5f})")
                 return True
         else:
-            # Structure baissiere: le prix doit rester sous SMA20
+            # SELL: sortir si le prix passe au-dessus SMA20
             if current_price > sma20:
                 logger.info(f"TIME EXIT: ticket {ticket}, SELL casse SMA20 ({current_price:.5f} > {sma20:.5f})")
                 return True
-            # Verifier si la structure LH est cassee
-            highs_arr = [r[2] for r in rates]
-            lows_arr = [r[3] for r in rates]
-            recent_high = max(highs_arr[-5:])
-            prior_high = max(highs_arr[-10:-5])
-            if recent_high > prior_high:
-                logger.info(f"TIME EXIT: ticket {ticket}, SELL structure LH cassee (recent high {recent_high:.5f} > prior {prior_high:.5f})")
+            # Structure break: prix casse le plus haut des 20 dernieres bougies
+            highest_20 = max(highs)
+            if current_price > highest_20:
+                logger.info(f"TIME EXIT: ticket {ticket}, SELL casse highest 20-bar ({current_price:.5f} > {highest_20:.5f})")
                 return True
 
         # Securite: stagnation totale >4h

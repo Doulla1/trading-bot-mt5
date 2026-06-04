@@ -13,6 +13,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # --- Configuration IA (v4.0: multi-provider) ---
+    # Cle API principale pour les decisions de trading
+    ai_api_key: str = ""
+    # Modele utilise pour la decision principale
+    ai_model: str = "deepseek-v4-pro"
+    # Modele utilise pour les cycles de confirmation (plus rapide/leger)
+    ai_fast_model: str = "deepseek-v4-flash"
+    # URL de base de l'API (change selon le fournisseur)
+    ai_base_url: str = "https://api.deepseek.com/v1"
+    # Nom du fournisseur (cosmetique, pour les logs)
+    ai_provider: str = "deepseek"
+    # --- Retrocompatibilite (deprecated, migrer vers ai_api_key) ---
     openai_api_key: str = ""
     deepseek_api_key: str = ""
     mt5_login: int = 0
@@ -38,6 +50,11 @@ class Settings(BaseSettings):
     report_sender_name: str = "Trading Bot MT5"
     report_send_hour_utc: int = 23
     report_send_minute_utc: int = 0
+
+    @property
+    def ai_api_key_resolved(self) -> str:
+        """Resout la cle API : ai_api_key d'abord, puis fallback deepseek_api_key (retrocompatibilite)."""
+        return self.ai_api_key or self.deepseek_api_key
 
     @property
     def project_root(self) -> Path:

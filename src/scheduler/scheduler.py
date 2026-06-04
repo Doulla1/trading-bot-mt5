@@ -183,9 +183,9 @@ def run_once() -> None:
         if settings.openai_api_key and chart_path:
             ocr_data = extract_chart_structure(chart_path, sym, tf)
 
-        # 8. Decision via DeepSeek V4 Pro v2.0
+        # 8. Decision via l'IA configuree dans .env (v4.0)
         decision = None
-        if settings.deepseek_api_key:
+        if settings.ai_api_key_resolved:
             decision = make_decision(
                 indicators=indicators_data, ocr_data=ocr_data,
                 calendar_events=relevant_events, open_positions=open_positions,

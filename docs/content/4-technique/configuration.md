@@ -7,11 +7,23 @@ Le bot est configure via un fichier `.env` a la racine du projet. Les parametres
 Creez un fichier `.env` a la racine du projet en copiant l'exemple ci-dessous :
 
 ```env
-# === OpenAI (OCR) ===
+# === IA Decision (v4.0: multi-provider) ===
+# Cle API (remplace DEEPSEEK_API_KEY, garde la retrocompatibilite)
+AI_API_KEY=sk-votre-cle-api
+# Modele principal pour les decisions de trading
+AI_MODEL=deepseek-v4-pro
+# Modele rapide pour les cycles de confirmation
+AI_FAST_MODEL=deepseek-v4-flash
+# URL de base de l'API (change selon le fournisseur)
+AI_BASE_URL=https://api.deepseek.com/v1
+# Nom du fournisseur pour les logs (cosmetique)
+AI_PROVIDER=deepseek
+
+# === OpenAI (OCR du chart) ===
 OPENAI_API_KEY=sk-votre-cle-api-openai
 
-# === DeepSeek (Decision) ===
-DEEPSEEK_API_KEY=sk-votre-cle-deepseek
+# === Retrocompatibilite (deprecated - utiliser AI_API_KEY) ===
+# DEEPSEEK_API_KEY=sk-ancienne-cle
 
 # === MetaTrader 5 ===
 MT5_LOGIN=12345678
@@ -46,11 +58,29 @@ LOG_FILE=logs/trading-bot.log
 |---|---|---|---|
 | `OPENAI_API_KEY` | `str` | `""` | Cle API OpenAI pour GPT-4o-mini (OCR visuel). Obtenable sur [platform.openai.com](https://platform.openai.com/api-keys) |
 
-### DeepSeek (Decision IA)
+### IA Decision (v4.0: multi-provider)
 
 | Variable | Type | Defaut | Description |
 |---|---|---|---|
-| `DEEPSEEK_API_KEY` | `str` | `""` | Cle API DeepSeek pour V4 Pro (decision). Obtenable sur [platform.deepseek.com](https://platform.deepseek.com/api_keys) |
+| `AI_API_KEY` | `str` | `""` | Cle API pour l'IA de decision. **Remplace `DEEPSEEK_API_KEY`** (toujours supporte en fallback). |
+| `AI_MODEL` | `str` | `deepseek-v4-pro` | Modele utilise pour les decisions principales. Ex: `gpt-5`, `claude-sonnet-4-20250514` (via OpenRouter) |
+| `AI_FAST_MODEL` | `str` | `deepseek-v4-flash` | Modele plus leger pour les cycles de confirmation |
+| `AI_BASE_URL` | `str` | `https://api.deepseek.com/v1` | URL de base de l'API OpenAI-compatible. Change selon le fournisseur |
+| `AI_PROVIDER` | `str` | `deepseek` | Nom du fournisseur (cosmetique, apparait dans les logs) |
+
+> **Comment changer de fournisseur** : voir le guide [Comment changer d'IA](comment-changer-ia.md)
+
+### OpenAI (OCR du chart)
+
+| Variable | Type | Defaut | Description |
+|---|---|---|---|
+| `OPENAI_API_KEY` | `str` | `""` | Cle API OpenAI pour GPT-4o (OCR visuel). Obtenable sur [platform.openai.com](https://platform.openai.com/api-keys) |
+
+### Retrocompatibilite
+
+| Variable | Type | Defaut | Description |
+|---|---|---|---|
+| `DEEPSEEK_API_KEY` | `str` | `""` | **Deprecated.** Utilisez `AI_API_KEY`. Si `AI_API_KEY` est vide, cette valeur est utilisee comme fallback. |
 
 ### MetaTrader 5
 

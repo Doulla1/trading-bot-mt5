@@ -1,0 +1,1 @@
+#Module Rapports Journaliers : mailer.py, generator.py, analyzer.py, daily_report.py
