@@ -216,42 +216,42 @@ class TestFormatIndicatorsV2Bollinger:
 class TestFormatIndicatorsV2MA:
     """Tests de formatage des moving averages."""
 
-    def test_sma20_price_above(self):
-        """Prix au-dessus de la SMA20."""
+    def test_ema20_price_above(self):
+        """Prix au-dessus de l'EMA20."""
         result = _format_indicators_v2({
-            "sma_20": 1.0830,
+            "ema_20": 1.0830,
             "current_price": 1.0850,
         })
         assert "au-dessus" in result
-        assert "SMA20" in result
+        assert "EMA20" in result
 
-    def test_sma20_price_below(self):
-        """Prix sous la SMA20."""
+    def test_ema20_price_below(self):
+        """Prix sous l'EMA20."""
         result = _format_indicators_v2({
-            "sma_20": 1.0870,
+            "ema_20": 1.0870,
             "current_price": 1.0850,
         })
         assert "sous" in result
-        assert "SMA20" in result
+        assert "EMA20" in result
 
-    def test_sma20_none_not_included(self):
-        """SMA20 None -> pas de ligne SMA20."""
+    def test_ema20_none_not_included(self):
+        """EMA20 None -> pas de ligne EMA20."""
         result = _format_indicators_v2({"current_price": 1.0850})
-        assert "SMA20" not in result
+        assert "EMA20" not in result
 
-    def test_sma50_price_above(self):
-        """Prix au-dessus de la SMA50."""
+    def test_ema200_price_above(self):
+        """Prix au-dessus de l'EMA200."""
         result = _format_indicators_v2({
-            "sma_50": 1.0800,
+            "ema_200": 1.0800,
             "current_price": 1.0850,
         })
         assert "au-dessus" in result
-        assert "SMA50" in result
+        assert "EMA200" in result
 
-    def test_sma50_none_not_included(self):
-        """SMA50 None -> pas de ligne SMA50."""
+    def test_ema200_none_not_included(self):
+        """EMA200 None -> pas de ligne EMA200."""
         result = _format_indicators_v2({"current_price": 1.0850})
-        assert "SMA50" not in result
+        assert "EMA200" not in result
 
 
 # ============================================================================
@@ -334,8 +334,6 @@ class TestFormatIndicatorsV2Full:
             "macd_signal": 0.001,
             "macd_histogram": 0.001,
             "bb_position_pct": 65.0,
-            "sma_20": 1.0830,
-            "sma_50": 1.0800,
             "current_price": 1.0850,
             "ema_20": 1.0840,
             "ema_200": 1.0750,
@@ -350,8 +348,6 @@ class TestFormatIndicatorsV2Full:
         assert "RSI 14" in result
         assert "MACD" in result
         assert "Bollinger" in result
-        assert "SMA20" in result
-        assert "SMA50" in result
         assert "EMA20" in result
         assert "EMA200" in result
         assert "ATR 14" in result
@@ -381,15 +377,15 @@ class TestFormatIndicatorsV2Full:
         result = _format_indicators_v2({"rsi_14": 100.0})
         assert "SURACHAT" in result
 
-    def test_current_price_none_no_sma_formatting(self):
-        """current_price None -> SMA20/SMA50 non formattes."""
+    def test_current_price_none_no_ema_formatting(self):
+        """current_price None -> EMA20/EMA200 non formattes."""
         result = _format_indicators_v2({
-            "sma_20": 1.0830,
-            "sma_50": 1.0800,
+            "ema_20": 1.0830,
+            "ema_200": 1.0800,
         })
-        # SMA20/SMA50 need current_price
-        assert "SMA20" not in result
-        assert "SMA50" not in result
+        # EMA20/EMA200 need current_price
+        assert "EMA20" not in result
+        assert "EMA200" not in result
 
     def test_bb_zero_is_sur_bande_inferieure(self):
         """BB = 0 -> SUR LA BANDE INFERIEURE."""

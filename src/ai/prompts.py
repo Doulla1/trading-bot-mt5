@@ -2,6 +2,20 @@
 
 v2.0: prompts separes OCR (GPT-4o-mini) et Decision (DeepSeek V4 Pro)."""
 
+# Configuration des limites de Stop Loss (SL) par symbole (en pips) pour l'affichage dans le prompt.
+# Permet a l'IA de proposer des valeurs de SL/TP realistes et adaptees a chaque classe d'actif.
+SL_LIMITS_CONFIG = {
+    "XAUUSD": {"min": 150, "max": 500, "note": "(1 pip = 0.1 USD de variation de prix, ex: 150 pips = 15.0 USD)"},
+    "EURUSD": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 de variation de prix)"},
+    "GBPUSD": {"min": 25,  "max": 70,  "note": "(1 pip = 0.0001 de variation de prix)"},
+    "AUDUSD": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 de variation de prix)"},
+    "USDJPY": {"min": 30,  "max": 90,  "note": "(1 pip = 0.01 de variation de prix)"},
+    "USDCHF": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 de variation de prix)"},
+    "EURGBP": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 de variation de prix)"},
+    "EURJPY": {"min": 25,  "max": 80,  "note": "(1 pip = 0.01 de variation de prix)"},
+    "GBPJPY": {"min": 35,  "max": 100, "note": "(1 pip = 0.01 de variation de prix)"},
+}
+
 
 def build_analysis_prompt(symbol, timeframe, indicators, calendar_events,
                           open_positions, account_info) -> str:
@@ -9,6 +23,11 @@ def build_analysis_prompt(symbol, timeframe, indicators, calendar_events,
     ind_text = _format_indicators(indicators)
     cal_text = _format_calendar(calendar_events)
     pos_text = _format_positions(open_positions, account_info)
+
+    sl_cfg = SL_LIMITS_CONFIG.get(symbol, {"min": 15, "max": 50, "note": ""})
+    min_sl = sl_cfg["min"]
+    max_sl = sl_cfg["max"]
+    note_sl = sl_cfg["note"]
 
     return f"""Tu es un analyste de trading forex expert. Analyse le graphique fourni en capture d'ecran et les donnees ci-dessous pour prendre une decision de trading.
 
@@ -32,7 +51,7 @@ Si une position est deja ouverte, evalue s'il faut la conserver ou la fermer.
 
 Reponds UNIQUEMENT avec un objet JSON:
 {{"action": "BUY|SELL|HOLD|CLOSE", "confidence": 0-100, "reasoning": "...", "stop_loss_pips": int, "take_profit_pips": int, "risk_level": "LOW|MEDIUM|HIGH"}}
-- stop_loss_pips entre 15 et 50, take_profit_pips >= stop_loss_pips * 1.5"""
+- stop_loss_pips entre {min_sl} et {max_sl} pips {note_sl}, take_profit_pips >= stop_loss_pips * 1.5"""
 
 
 def build_decision_prompt(symbol, timeframe, indicators, ocr_data,
@@ -110,17 +129,29 @@ def build_decision_prompt(symbol, timeframe, indicators, ocr_data,
             parts.append(_format_performance(performance_stats))
 
     # 11. INSTRUCTIONS
+    sl_cfg = SL_LIMITS_CONFIG.get(symbol, {"min": 15, "max": 50, "note": ""})
+    min_sl = sl_cfg["min"]
+    max_sl = sl_cfg["max"]
+    note_sl = sl_cfg["note"]
+
     parts.append(f"""--- DECISION ---
 Analyse TOUTES les donnees (technique, Ichimoku, pivots, volume, structure, multi-timeframe, regime de marche, calendrier, historique).
 
-Regles:
-- CONFIDENCE elevee (>70) uniquement si TOUS les signaux convergent
-- Si une news HIGH impact approche (<30 min) -> HOLD systematique
-- Si Ichimoku, pivots et structure sont en conflit -> HOLD
-- Si ADX < 20 (ranging) -> eviter de trader, preference HOLD
-- Eviter d'ouvrir une position juste avant une news HIGH (le bot bloque deja, mais sois prudent)
-- SL entre 15 et 50 pips selon ATR et volatilite
-- TP >= 1.5x le stop loss
+Regles generales:
+- CONFIDENCE elevee (>70) uniquement si TOUS les signaux convergent.
+- Si une news HIGH impact approche (<30 min) -> HOLD systematique.
+- Si Ichimoku, pivots et structure sont en conflit -> HOLD.
+- Si ADX < 20 (ranging) -> eviter de trader, preference HOLD.
+- Eviter d'ouvrir une position juste avant une news HIGH (le bot bloque deja, mais sois prudent).
+
+REGLES DE PLACEMENT DU STOP LOSS (SL) ET TAKE PROFIT (TP) :
+- Le Stop Loss (SL) DOIT etre place de maniere technique et realiste sous forme de distance en pips :
+  * Pour {symbol}, le SL doit etre compris entre {min_sl} et {max_sl} pips {note_sl} selon la volatilite (ATR).
+  * BUY : Place le SL juste sous le dernier swing low (support de structure) ou sous le bas du nuage Ichimoku (support dynamique).
+  * SELL : Place le SL juste au-dessus du dernier swing high (resistance de structure) ou au-dessus du haut du nuage Ichimoku (resistance dynamique).
+- Le Take Profit (TP) DOIT respecter un ratio minimal et etre place de maniere realiste (securisation des gains) :
+  * Le TP doit etre au moins superieur a 1.5x le Stop Loss (TP >= 1.5 * SL).
+  * SECURISATION DES GAINS : Place le TP de maniere intelligente par rapport aux obstacles graphiques. Pour un BUY, place-le 1 a 2 pips SOUS le dernier swing high (ou sous la resistance Pivot R1/R2/R3 ou sous le High 24h) pour garantir son execution avant un rejet. Pour un SELL, place-le 1 a 2 pips AU-DESSUS du dernier swing low (ou du support Pivot S1/S2/S3 ou du Low 24h).
 
 POSITIONS EXISTANTES (regle conservative):
 - Si tu as deja une position et que les signaux confirment ta direction -> HOLD (la position est bonne, le trailing/breakeven s'en occupe)

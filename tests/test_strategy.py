@@ -1099,7 +1099,8 @@ class TestPassesTradeFiltersADX:
         with patch.object(strat, "count_open_positions", return_value=0), \
              patch.object(strat, "_circuit_breaker_active", return_value=False), \
              patch.object(strat, "_count_consecutive_losses", return_value=0), \
-             patch.object(strat.settings, "trading_symbol", "XAUUSD"):
+             patch.object(strat.settings, "trading_symbol", "XAUUSD"), \
+             patch.object(strat, "_DISABLED_SYMBOLS", {"XAUUSD"}):
             result = strat._passes_trade_filters(decision, symbol_info)
 
         assert result is False
@@ -1115,7 +1116,8 @@ class TestPassesTradeFiltersADX:
         with patch.object(strat, "count_open_positions", return_value=0), \
              patch.object(strat, "_circuit_breaker_active", return_value=False), \
              patch.object(strat, "_count_consecutive_losses", return_value=0), \
-             patch.object(strat.settings, "trading_symbol", "XAUUSD"):
+             patch.object(strat.settings, "trading_symbol", "XAUUSD"), \
+             patch.object(strat, "_DISABLED_SYMBOLS", {"XAUUSD"}):
             result = strat._passes_trade_filters(decision, symbol_info)
 
         assert result is False
@@ -1131,7 +1133,8 @@ class TestPassesTradeFiltersADX:
         with patch.object(strat, "count_open_positions", return_value=0), \
              patch.object(strat, "_circuit_breaker_active", return_value=False), \
              patch.object(strat, "_count_consecutive_losses", return_value=0), \
-             patch.object(strat.settings, "trading_symbol", "EURUSD"):
+             patch.object(strat.settings, "trading_symbol", "EURUSD"), \
+             patch.object(strat, "_DISABLED_SYMBOLS", {"XAUUSD"}):
             result = strat._passes_trade_filters(decision, symbol_info)
 
         assert result is True

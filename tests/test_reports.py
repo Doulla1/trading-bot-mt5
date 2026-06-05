@@ -681,6 +681,7 @@ class TestAnalyzeDailyResults:
     def test_missing_api_key_returns_fallback(self, monkeypatch, sample_stats, sample_trades):
         """Cle API manquante -> message de fallback."""
         monkeypatch.setattr("src.reports.analyzer.settings.ai_api_key", "")
+        monkeypatch.setattr("src.reports.analyzer.settings.deepseek_api_key", "")
 
         with patch("src.reports.analyzer.OpenAI") as mock_openai:
             result = analyze_daily_results(sample_stats, sample_trades, "")
