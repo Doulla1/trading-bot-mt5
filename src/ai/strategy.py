@@ -7,6 +7,7 @@ import MetaTrader5 as mt5
 from loguru import logger
 from dataclasses import dataclass, field
 from typing import Optional
+from datetime import datetime, timezone
 
 from src.config import settings
 from src.mt5.bridge import get_account_info, get_symbol_info, is_market_open
@@ -246,6 +247,11 @@ def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
     """Applique les filtres pre-trade: confiance, max positions, spread, circuit breaker, RSI/BB.
 
     v4.1: Ajoute le filtre symboles desactives (_DISABLED_SYMBOLS) et anti-range (_is_ranging_market)."""
+    # v4.2: Filtre week-end - pas de nouvelle position de vendredi 20h30 UTC à lundi 00h00 UTC
+    if is_weekend_closure(datetime.now(timezone.utc)):
+        logger.info(f"Filtre week-end actif : aucun nouveau trade autorisé pour {settings.trading_symbol}")
+        return False
+
     confidence = decision["confidence"]
     if confidence < settings.min_confidence_threshold:
         logger.info(f"Confiance {confidence}% < seuil {settings.min_confidence_threshold}%")
@@ -410,9 +416,23 @@ def _circuit_breaker_active() -> bool:
 def manage_open_positions() -> int:
     """Applique breakeven, trailing stop, time exit aux positions ouvertes.
     Appele au debut de chaque cycle. Retourne le nombre de modifications.
-    v4.0: Active un cooldown apres TIME EXIT pour eviter le re-entry immediat."""
+    v4.0: Active un cooldown apres TIME EXIT pour eviter le re-entry immediat.
+    v4.2: Clôture d'urgence de fin de semaine à partir de vendredi 20h30 UTC."""
     sym = settings.trading_symbol
     modifications = 0
+
+    # Clôture d'urgence du week-end
+    now_utc = datetime.now(timezone.utc)
+    if is_weekend_closure(now_utc):
+        open_pos = get_open_positions(sym)
+        if open_pos:
+            logger.warning(f"[{sym}] Période de fermeture du week-end active. Clôture forcée de {len(open_pos)} position(s).")
+            for pos in open_pos:
+                res = close_position(pos["ticket"], sym)
+                if res.success:
+                    modifications += 1
+            return modifications
+
     for pos in get_open_positions(sym):
         if _apply_breakeven(pos):
             modifications += 1
@@ -425,6 +445,22 @@ def manage_open_positions() -> int:
             _set_cooldown_after_exit(sym, direction)
             modifications += 1
     return modifications
+
+
+def is_weekend_closure(dt: datetime) -> bool:
+    """Détermine si on est dans la période de fermeture du week-end (de vendredi 20h30 UTC à lundi 00h00 UTC)."""
+    if dt.tzinfo is None:
+        dt_utc = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt_utc = dt.astimezone(timezone.utc)
+        
+    weekday = dt_utc.weekday()  # 0=Lundi, ..., 4=Vendredi, 5=Samedi, 6=Dimanche
+    if weekday == 4:  # Vendredi
+        if dt_utc.hour > 20 or (dt_utc.hour == 20 and dt_utc.minute >= 30):
+            return True
+    elif weekday in (5, 6):  # Samedi, Dimanche
+        return True
+    return False
 
 
 def _apply_breakeven(pos: dict) -> bool:
@@ -570,6 +606,7 @@ def _modify_sl(ticket: int, new_sl: float) -> None:
     """Modifie le SL d'une position ouverte.
     v3.0: Verifie trade_stops_level du broker avant modification."""
     sym = settings.trading_symbol
+    pos = []
     sym_info = mt5.symbol_info(sym)
 
     # Verifier la distance minimale SL autorisee par le broker
@@ -597,11 +634,14 @@ def _modify_sl(ticket: int, new_sl: float) -> None:
                         )
                         return
 
+    # Conserver le TP existant (BUG: MT5 supprime le TP si on ne le repasse pas)
+    current_tp = pos[0].tp if pos and len(pos) > 0 else 0.0
     request = {
         "action": mt5.TRADE_ACTION_SLTP,
         "symbol": sym,
         "position": ticket,
         "sl": new_sl,
+        "tp": current_tp,
     }
     result = mt5.order_send(request)
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:

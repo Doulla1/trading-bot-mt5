@@ -1483,3 +1483,81 @@ class TestATRSLHardFloor:
 
         assert sl == 15
         assert tp == 30
+
+
+# ============================================================================
+# Weekend Closure Tests
+# ============================================================================
+
+class TestWeekendClosure:
+    """Tests pour l'auto-clôture du week-end et la suspension des signaux."""
+
+    def test_is_weekend_closure_times(self):
+        """Vérifie le comportement de la fonction is_weekend_closure sur différentes dates."""
+        from datetime import datetime, timezone
+        import src.ai.strategy as strat
+
+        # Mercredi midi (pas fermeture)
+        dt_wed = datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc)
+        assert strat.is_weekend_closure(dt_wed) is False
+
+        # Vendredi 20h29 UTC (pas fermeture)
+        dt_fri_before = datetime(2026, 6, 5, 20, 29, tzinfo=timezone.utc)
+        assert strat.is_weekend_closure(dt_fri_before) is False
+
+        # Vendredi 20h30 UTC (fermeture active)
+        dt_fri_start = datetime(2026, 6, 5, 20, 30, tzinfo=timezone.utc)
+        assert strat.is_weekend_closure(dt_fri_start) is True
+
+        # Vendredi 22h00 UTC (fermeture active)
+        dt_fri_after = datetime(2026, 6, 5, 22, 0, tzinfo=timezone.utc)
+        assert strat.is_weekend_closure(dt_fri_after) is True
+
+        # Samedi (fermeture active)
+        dt_sat = datetime(2026, 6, 6, 12, 0, tzinfo=timezone.utc)
+        assert strat.is_weekend_closure(dt_sat) is True
+
+        # Dimanche 23h59 UTC (fermeture active)
+        dt_sun = datetime(2026, 6, 7, 23, 59, tzinfo=timezone.utc)
+        assert strat.is_weekend_closure(dt_sun) is True
+
+        # Lundi 00h01 UTC (pas fermeture)
+        dt_mon = datetime(2026, 6, 8, 0, 1, tzinfo=timezone.utc)
+        assert strat.is_weekend_closure(dt_mon) is False
+
+        # Test compatibilité avec timezone naïve (considérée comme UTC par défaut)
+        dt_naive = datetime(2026, 6, 6, 12, 0)
+        assert strat.is_weekend_closure(dt_naive) is True
+
+    def test_manage_open_positions_closes_during_weekend(self):
+        """Vérifie que manage_open_positions ferme toutes les positions si le week-end est actif."""
+        from unittest.mock import patch, MagicMock
+        import src.ai.strategy as strat
+        from src.mt5.executor import TradeResult
+
+        mock_positions = [
+            {"ticket": 11111, "type": 0, "volume": 0.05, "price_open": 1.0850, "sl": 1.0820, "tp": 1.0950},
+            {"ticket": 22222, "type": 1, "volume": 0.05, "price_open": 1.0850, "sl": 1.0880, "tp": 1.0750}
+        ]
+
+        with patch("src.ai.strategy.is_weekend_closure", return_value=True), \
+             patch("src.ai.strategy.get_open_positions", return_value=mock_positions), \
+             patch("src.ai.strategy.close_position", return_value=TradeResult(True, 11111, 0.05, 1.0850, 0, 0, "Ferme")) as mock_close:
+            
+            modifs = strat.manage_open_positions()
+            
+            # Les deux positions doivent être fermées
+            assert modifs == 2
+            assert mock_close.call_count == 2
+
+    def test_passes_trade_filters_rejects_during_weekend(self):
+        """Vérifie que _passes_trade_filters rejette les nouveaux ordres si le week-end est actif."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = {"action": "BUY", "confidence": 90, "stop_loss_pips": 20, "take_profit_pips": 40}
+        symbol_info = {"spread": 5, "point": 0.00001, "digits": 5}
+
+        with patch("src.ai.strategy.is_weekend_closure", return_value=True):
+            allowed = strat._passes_trade_filters(decision, symbol_info)
+            assert allowed is False

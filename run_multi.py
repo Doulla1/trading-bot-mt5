@@ -175,6 +175,12 @@ def run_symbol(cfg: dict) -> None:
     # Reconciliation
     _reconcile_closed_positions(sym)
 
+    # v4.2: Suspendre le trading si on est en fermeture de week-end (après vendredi 20h30 UTC)
+    from src.ai.strategy import is_weekend_closure
+    if is_weekend_closure(datetime.now(timezone.utc)):
+        logger.info(f"[{sym}] Période de fermeture du week-end active (après vendredi 20h30 UTC). Nouvelle analyse suspendue.")
+        return
+
     if not bridge.is_market_open():
         logger.info(f"[{sym}] Marche ferme")
         return
