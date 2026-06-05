@@ -1,18 +1,18 @@
-# Module Scheduler : scheduler.py
+# Module Scheduler : scheduler.py + run_multi.py
 
-**Fichier** : `src/scheduler/scheduler.py`
+**Fichiers** : `src/scheduler/scheduler.py`, `run_multi.py`
 
 ## Vue d'ensemble
 
-Le scheduler est l'orchestrateur du bot. Il coordonne l'execution des cycles d'analyse et de trading, soit en mode unique, soit en boucle continue.
+Le scheduler est l'orchestrateur du bot. Il coordonne l'execution des cycles d'analyse et de trading, soit en mode unique (`run.py`), soit en boucle multi-symboles (`run_multi.py`).
 
 ```mermaid
 flowchart TD
-    run[run.py] --> run_forever
+    run[run.py / run_multi.py] --> run_forever
     run --> run_once
-    run_forever -->|APScheduler toutes les N min| run_once
+    run_forever -->|APScheduler / boucle 15 min| run_once
     run_once --> manage[manage_open_positions - Breakeven/Trailing/TimeExit]
-    manage --> reconcile[reconcile_closed_positions]
+    manage --> reconcile[reconcile_closed_positions - symbol= explicite v4.1]
     reconcile --> bridge_connect[bridge.connect()]
     bridge_connect --> is_open{is_market_open?}
     is_open -->|Non| return[Retour]
@@ -25,13 +25,21 @@ flowchart TD
     news -->|Oui| return
     news -->|Non| ocr[ocr.extract_chart_structure - GPT-4o-mini]
     ocr --> session[_get_session_context - Asian/London/NY]
-    session --> history[get_recent_trades + get_statistics]
+    session --> history[get_recent_trades + get_statistics - symbol= v4.1]
     history --> deepseek[analyzer.make_decision - DeepSeek V4 Pro]
-    deepseek --> strategy[strategy.execute_decision]
-    strategy --> log[database.log_analysis]
+    deepseek --> strategy[strategy.execute_decision - Hard SL + Anti-Range v4.1]
+    strategy --> log[log_trade_open - symbol= explicite v4.1]
     log --> disconnect[bridge.disconnect]
     disconnect --> cleanup[screenshots.cleanup_old_screenshots]
 ```
+
+## Changements v4.1 : correction contamination DB
+
+Avant v4.1, le scheduler multi-symboles ecrivait les trades dans `data/eurusd/trading.db` quel que soit le symbole reellement trade. La correction passe par :
+
+1. **`reconcile_closed_positions(sym)`** : passe `symbol=sym` a `get_db()` et `log_trade_close()`
+2. **`run_symbol(cfg)`** : passe `symbol=sym` a `log_trade_open()` et `get_recent_trades()`/`get_statistics()`
+3. **`get_db(symbol)`** : utilise `data/{symbol.lower()}/trading.db` quand `symbol` est fourni
 
 ## Fonctions
 

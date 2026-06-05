@@ -1085,3 +1085,398 @@ class TestPassesTradeFiltersADX:
 
         # isinstance check protects, bb_pos "invalid" is not (int, float), no BB block
         assert result is True
+
+    # --- v4.1: Disabled symbols ---
+
+    def test_disabled_symbol_blocks_trade(self):
+        """XAUUSD est dans _DISABLED_SYMBOLS -> _passes_trade_filters retourne False."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = _make_decision("BUY", rsi=55, bb_pos=50, adx=30)
+        symbol_info = self._make_symbol_info()
+
+        with patch.object(strat, "count_open_positions", return_value=0), \
+             patch.object(strat, "_circuit_breaker_active", return_value=False), \
+             patch.object(strat, "_count_consecutive_losses", return_value=0), \
+             patch.object(strat.settings, "trading_symbol", "XAUUSD"):
+            result = strat._passes_trade_filters(decision, symbol_info)
+
+        assert result is False
+
+    def test_disabled_symbol_sell_also_blocked(self):
+        """XAUUSD SELL aussi bloque par _DISABLED_SYMBOLS."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = _make_decision("SELL", rsi=45, bb_pos=50, adx=30)
+        symbol_info = self._make_symbol_info()
+
+        with patch.object(strat, "count_open_positions", return_value=0), \
+             patch.object(strat, "_circuit_breaker_active", return_value=False), \
+             patch.object(strat, "_count_consecutive_losses", return_value=0), \
+             patch.object(strat.settings, "trading_symbol", "XAUUSD"):
+            result = strat._passes_trade_filters(decision, symbol_info)
+
+        assert result is False
+
+    def test_enabled_symbol_not_blocked(self):
+        """EURUSD n'est PAS dans _DISABLED_SYMBOLS -> autorise."""
+        from unittest.mock import patch
+        import src.ai.strategy as strat
+
+        decision = _make_decision("BUY", rsi=55, bb_pos=50, adx=30)
+        symbol_info = self._make_symbol_info()
+
+        with patch.object(strat, "count_open_positions", return_value=0), \
+             patch.object(strat, "_circuit_breaker_active", return_value=False), \
+             patch.object(strat, "_count_consecutive_losses", return_value=0), \
+             patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            result = strat._passes_trade_filters(decision, symbol_info)
+
+        assert result is True
+
+
+# ============================================================================
+# 5. _is_ranging_market() - Anti-range filter (v4.1)
+# ============================================================================
+
+
+class TestIsRangingMarket:
+    """Tests de _is_ranging_market() - detection du range ADX."""
+
+    def setup_method(self):
+        """Reset le state global avant chaque test."""
+        import src.ai.strategy as strat
+        strat._ranging_state.clear()
+
+    def teardown_method(self):
+        """Cleanup apres chaque test."""
+        import src.ai.strategy as strat
+        strat._ranging_state.clear()
+
+    # --- ADX au-dessus du seuil: reset compteur, retourne False ---
+
+    def test_adx_above_threshold_resets_and_returns_false(self):
+        """ADX > 25: reset le compteur, retourne False."""
+        import src.ai.strategy as strat
+
+        decision = _make_decision("BUY", adx=30)
+
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            result = strat._is_ranging_market(decision)
+
+        assert result is False
+        assert strat._ranging_state.get("EURUSD", -1) == 0
+
+    def test_adx_above_threshold_after_range_resets_counter(self):
+        """Apres 2 periodes ADX bas, un ADX > 25 reset le compteur."""
+        import src.ai.strategy as strat
+
+        # 2 periodes ADX bas
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            strat._is_ranging_market(_make_decision("BUY", adx=20))
+            strat._is_ranging_market(_make_decision("BUY", adx=20))
+            assert strat._ranging_state.get("EURUSD") == 2
+
+            # Puis ADX remonte
+            result = strat._is_ranging_market(_make_decision("BUY", adx=30))
+
+        assert result is False
+        assert strat._ranging_state.get("EURUSD") == 0
+
+    # --- ADX sous le seuil, pas assez de periodes ---
+
+    def test_adx_below_threshold_1_period_returns_false(self):
+        """1 periode ADX < 25 -> compteur=1, pas encore de range."""
+        import src.ai.strategy as strat
+
+        decision = _make_decision("BUY", adx=20)
+
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            result = strat._is_ranging_market(decision)
+
+        assert result is False
+        assert strat._ranging_state.get("EURUSD") == 1
+
+    def test_adx_below_threshold_2_periods_returns_false(self):
+        """2 periodes ADX < 25 -> compteur=2, pas encore de range."""
+        import src.ai.strategy as strat
+
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            strat._is_ranging_market(_make_decision("BUY", adx=20))
+            result = strat._is_ranging_market(_make_decision("BUY", adx=20))
+
+        assert result is False
+        assert strat._ranging_state.get("EURUSD") == 2
+
+    def test_adx_below_threshold_3_periods_returns_true(self):
+        """3 periodes consecutives ADX < 25 -> range detecte, retourne True."""
+        import src.ai.strategy as strat
+
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            strat._is_ranging_market(_make_decision("BUY", adx=20))
+            strat._is_ranging_market(_make_decision("BUY", adx=20))
+            result = strat._is_ranging_market(_make_decision("BUY", adx=20))
+
+        assert result is True
+        assert strat._ranging_state.get("EURUSD") == 3
+
+    def test_adx_below_threshold_4_periods_continues_range(self):
+        """4+ periodes ADX < 25 -> range continue, retourne True."""
+        import src.ai.strategy as strat
+
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            for _ in range(3):
+                strat._is_ranging_market(_make_decision("BUY", adx=20))
+            # 4eme appel
+            result = strat._is_ranging_market(_make_decision("BUY", adx=20))
+
+        assert result is True
+        assert strat._ranging_state.get("EURUSD") == 4
+
+    # --- ADX exactement au seuil ---
+
+    def test_adx_exactly_25_is_considered_below_threshold(self):
+        """ADX = 25 (<= seuil): apres 3 periodes, range detecte."""
+        import src.ai.strategy as strat
+
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            for _ in range(2):
+                strat._is_ranging_market(_make_decision("BUY", adx=25))
+            result = strat._is_ranging_market(_make_decision("BUY", adx=25))
+
+        # adx=25 n'est PAS > 25 (strict), donc il est traite comme bas
+        assert result is True
+
+    def test_adx_exactly_25_001_is_above_threshold(self):
+        """ADX = 25.001 (> 25): reset, retourne False."""
+        import src.ai.strategy as strat
+
+        decision = _make_decision("BUY", adx=25.001)
+
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            result = strat._is_ranging_market(decision)
+
+        assert result is False
+
+    # --- ADX None ---
+
+    def test_adx_none_returns_false_and_resets(self):
+        """ADX None (default 30 > 25): retourne False, reset compteur."""
+        import src.ai.strategy as strat
+
+        decision = {
+            "action": "BUY",
+            "confidence": 75,
+            "stop_loss_pips": 20,
+            "take_profit_pips": 40,
+            "risk_level": "MEDIUM",
+            "indicators": {"rsi_14": 50},  # pas d'adx_14
+        }
+
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            result = strat._is_ranging_market(decision)
+
+        assert result is False
+        assert strat._ranging_state.get("EURUSD") == 0
+
+    # --- Pas d'indicateurs du tout ---
+
+    def test_no_indicators_returns_false(self):
+        """Aucun indicateur -> ADX default 30 > 25, retourne False."""
+        import src.ai.strategy as strat
+
+        decision = {
+            "action": "BUY",
+            "confidence": 75,
+            "stop_loss_pips": 20,
+            "take_profit_pips": 40,
+            "risk_level": "MEDIUM",
+        }
+
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            result = strat._is_ranging_market(decision)
+
+        assert result is False
+
+    # --- Symboles differents ont des etats separes ---
+
+    def test_different_symbols_have_separate_state(self):
+        """EURUSD en range n'affecte pas GBPUSD."""
+        import src.ai.strategy as strat
+
+        # Mettre EURUSD en range
+        with patch.object(strat.settings, "trading_symbol", "EURUSD"):
+            for _ in range(3):
+                strat._is_ranging_market(_make_decision("BUY", adx=20))
+            assert strat._is_ranging_market(_make_decision("BUY", adx=20)) is True
+
+        # GBPUSD n'a jamais ete appele -> compteur 0
+        with patch.object(strat.settings, "trading_symbol", "GBPUSD"):
+            result = strat._is_ranging_market(_make_decision("BUY", adx=20))
+
+        assert result is False  # 1er appel, compteur=1 < 3
+        assert strat._ranging_state.get("GBPUSD") == 1
+        assert strat._ranging_state.get("EURUSD") == 4  # EURUSD toujours en range
+
+
+# ============================================================================
+# 6. _get_atr_based_sl_tp() - Hard SL floor (v4.1)
+# ============================================================================
+
+
+class TestATRSLHardFloor:
+    """Tests du hard SL floor dans _get_atr_based_sl_tp et execute_decision."""
+
+    # --- _get_atr_based_sl_tp: SL sous min_sl avec ATR valide ---
+
+    def test_atr_sl_respects_min_sl_floor(self):
+        """DeepSeek donne SL=5, ATR calcule 8, min_sl=15 -> SL final = 15."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        indicators = {"atr_14": 0.00050}  # ~5 pips pour EURUSD
+        sym_info = MagicMock()
+        sym_info.point = 0.00001
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            sl, tp = strat._get_atr_based_sl_tp("EURUSD", indicators, deepseek_sl=5, deepseek_tp=10)
+
+        # ATR based: max(min_sl=15, 5*1.5=7.5) = 15
+        # SL final: max(deepseek=5, ATR=15) = 15
+        # TP final: max(deepseek=10, min_tp=30, 15*2=30) = 30
+        assert sl == 15
+        assert tp == 30
+
+    def test_atr_sl_above_min_keeps_value(self):
+        """DeepSeek SL=25 > min_sl=15 -> SL final = 25 (DeepSeek gagne)."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        indicators = {"atr_14": 0.00200}  # ~20 pips pour EURUSD
+        sym_info = MagicMock()
+        sym_info.point = 0.00001
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            sl, tp = strat._get_atr_based_sl_tp("EURUSD", indicators, deepseek_sl=25, deepseek_tp=50)
+
+        # ATR based: max(15, 20*1.5=30) = 30
+        # SL final: max(25, 30) = 30
+        # TP final: max(50, min_tp=30, 30*2=60) = 60
+        assert sl == 30
+        assert tp == 60
+
+    def test_atr_sl_empty_indicators_uses_min_sl(self):
+        """Indicators vide -> ATR=None -> atr_based_sl = min_sl (15)."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        sym_info = MagicMock()
+        sym_info.point = 0.00001
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            sl, tp = strat._get_atr_based_sl_tp("EURUSD", {}, deepseek_sl=5, deepseek_tp=10)
+
+        # Indicators empty, atr_value = None -> atr_based_sl = min_sl = 15
+        # SL final: max(5, 15) = 15
+        # TP final: max(10, 30, 15*2=30) = 30
+        assert sl == 15
+        assert tp == 30
+
+    def test_atr_sl_none_indicators_uses_min_sl(self):
+        """Indicators=None -> ATR=None -> atr_based_sl = min_sl."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        sym_info = MagicMock()
+        sym_info.point = 0.00001
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            sl, tp = strat._get_atr_based_sl_tp("EURUSD", None, deepseek_sl=5, deepseek_tp=10)
+
+        assert sl == 15
+        assert tp == 30
+
+    def test_atr_sl_atr_zero_uses_min_sl(self):
+        """ATR=0 -> atr_pips=0 -> atr_based_sl = min_sl."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        indicators = {"atr_14": 0.0}
+        sym_info = MagicMock()
+        sym_info.point = 0.00001
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            sl, tp = strat._get_atr_based_sl_tp("EURUSD", indicators, deepseek_sl=5, deepseek_tp=10)
+
+        assert sl == 15
+        assert tp == 30
+
+    # --- Hard floor par symbole ---
+
+    def test_xauusd_min_sl_150(self):
+        """XAUUSD: min_sl=150, DeepSeek SL=50 -> SL=150."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        indicators = {"atr_14": 10.0}
+        sym_info = MagicMock()
+        sym_info.point = 0.01  # XAUUSD point
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            sl, tp = strat._get_atr_based_sl_tp("XAUUSD", indicators, deepseek_sl=50, deepseek_tp=100)
+
+        # ATR pips = 10 / (10*0.01) = 100
+        # atr_based_sl = max(150, 100*0.5=50) = 150
+        # SL final: max(50, 150) = 150
+        assert sl == 150
+
+    def test_gbpusd_min_sl_25(self):
+        """GBPUSD: min_sl=25 (updated from 18)."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        indicators = {"atr_14": 0.00050}  # ~5 pips
+        sym_info = MagicMock()
+        sym_info.point = 0.00001
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            sl, tp = strat._get_atr_based_sl_tp("GBPUSD", indicators, deepseek_sl=5, deepseek_tp=10)
+
+        # atr_based_sl = max(25, 5*1.8=9) = 25
+        # SL final: max(5, 25) = 25
+        assert sl == 25
+
+    def test_usdjpy_min_sl_30(self):
+        """USDJPY: min_sl=30 (updated from 20)."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        indicators = {"atr_14": 0.050}  # ~0.5 pips
+        sym_info = MagicMock()
+        sym_info.point = 0.001
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            sl, tp = strat._get_atr_based_sl_tp("USDJPY", indicators, deepseek_sl=5, deepseek_tp=10)
+
+        # atr_based_sl = max(30, 5*1.8=9) = 30
+        # SL final: max(5, 30) = 30
+        assert sl == 30
+
+    # --- Symbole inconnu: fallback EURUSD ---
+
+    def test_unknown_symbol_falls_back_to_eurusd_config(self):
+        """Symbole inconnu utilise la config EURUSD (min_sl=15)."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        indicators = {}
+        sym_info = MagicMock()
+        sym_info.point = 0.00001
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            sl, tp = strat._get_atr_based_sl_tp("NZDCAD", indicators, deepseek_sl=5, deepseek_tp=10)
+
+        assert sl == 15
+        assert tp == 30

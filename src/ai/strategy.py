@@ -26,14 +26,26 @@ from src.data.database import get_db, log_trade_close
 _ATR_SL_CONFIG: dict[str, dict] = {
     "XAUUSD": {"atr_mult": 0.5, "min_sl": 150, "min_tp": 300, "tp_ratio": 2.0},
     "EURUSD": {"atr_mult": 1.5, "min_sl": 15,  "min_tp": 30,  "tp_ratio": 2.0},
-    "GBPUSD": {"atr_mult": 1.5, "min_sl": 18,  "min_tp": 36,  "tp_ratio": 2.0},
+    "GBPUSD": {"atr_mult": 1.8, "min_sl": 25,  "min_tp": 50,  "tp_ratio": 2.0},
     "AUDUSD": {"atr_mult": 1.5, "min_sl": 15,  "min_tp": 30,  "tp_ratio": 2.0},
-    "USDJPY": {"atr_mult": 1.5, "min_sl": 20,  "min_tp": 40,  "tp_ratio": 2.0},
+    "USDJPY": {"atr_mult": 1.8, "min_sl": 30,  "min_tp": 60,  "tp_ratio": 2.0},
     "USDCHF": {"atr_mult": 1.5, "min_sl": 15,  "min_tp": 30,  "tp_ratio": 2.0},
+    "EURGBP": {"atr_mult": 1.5, "min_sl": 15,  "min_tp": 30,  "tp_ratio": 2.0},
+    "EURJPY": {"atr_mult": 1.8, "min_sl": 25,  "min_tp": 50,  "tp_ratio": 2.0},
+    "GBPJPY": {"atr_mult": 2.0, "min_sl": 35,  "min_tp": 70,  "tp_ratio": 2.0},
 }
 
 # Duree du cooldown apres un TIME EXIT (en minutes)
 _COOLDOWN_MINUTES: int = 30
+
+# v4.1: Symboles temporairement desactives (pertes recurrentes, modele inadapte)
+_DISABLED_SYMBOLS: set[str] = set()
+
+# v4.1: Seuil ADX anti-range et nombre de periodes consecutives
+_RANGING_ADX_THRESHOLD: float = 25.0
+_RANGING_CONSECUTIVE_BARS: int = 3
+# Stocke les derniers ADX par symbole pour detecter le range
+_ranging_state: dict[str, int] = {}  # sym -> compteur de periodes ADX < seuil
 
 
 def _atr_to_pips(atr_value: float, point: float) -> float:
@@ -114,7 +126,10 @@ class StrategyResult:
 
 
 def execute_decision(decision: dict) -> StrategyResult:
-    """Execute la decision de l'IA avec les regles de risk management."""
+    """Execute la decision de l'IA avec les regles de risk management.
+
+    v4.1: Applique le Hard SL Floor (le SL ne peut JAMAIS etre < min_sl du symbole)
+    et le filtre anti-range (ADX < 25 pendant 3+ periodes bloque BUY/SELL)."""
     result = StrategyResult(decision=decision)
     action = decision["action"]
 
@@ -148,15 +163,8 @@ def execute_decision(decision: dict) -> StrategyResult:
                 logger.info(f"Fermeture {existing_dir} (signaux opposes), pas de reversal immediat")
                 close_res = close_position(existing_pos["ticket"])
                 result.closed_positions.append(close_res)
-                # BUG-D: log immediat pour ne pas attendre la reconciliation
-                if close_res.success:
-                    deals = mt5.history_deals_get(position=existing_pos["ticket"])
-                    close_deal = next((d for d in deals if d.entry == 1), None) if deals else None
-                    log_trade_close(
-                        existing_pos["ticket"],
-                        close_res.price,
-                        close_deal.profit if close_deal else 0.0,
-                    )
+                # On ne logue plus la fermeture ici (evite la race condition avec MT5 history)
+                # La boucle _reconcile_closed_positions se chargera de recuperer le vrai profit.
                 return result
             else:
                 # Meme direction: on garde la position, le trailing/breakeven s'en occupe
@@ -167,13 +175,22 @@ def execute_decision(decision: dict) -> StrategyResult:
         if not _passes_trade_filters(decision, symbol_info):
             return result
 
-        # v4.0: Ajuster SL/TP selon l'ATR du symbole
+        # v4.1: Ajuster SL/TP selon l'ATR du symbole + HARD FLOOR
         indicators = decision.get("indicators", {})
         raw_sl = decision["stop_loss_pips"]
         raw_tp = decision["take_profit_pips"]
         stop_loss_pips, take_profit_pips = _get_atr_based_sl_tp(
             sym, indicators, raw_sl, raw_tp
         )
+        # v4.1: HARD FLOOR - l'IA ne peut JAMAIS reduire le SL en dessous du minimum config
+        cfg_floor = _ATR_SL_CONFIG.get(sym, _ATR_SL_CONFIG["EURUSD"])
+        if stop_loss_pips < cfg_floor["min_sl"]:
+            logger.warning(
+                f"SL HARD FLOOR pour {sym}: {stop_loss_pips} -> {cfg_floor['min_sl']} pips "
+                f"(IA={raw_sl}, ATR ajuste insuffisant)"
+            )
+            stop_loss_pips = cfg_floor["min_sl"]
+            take_profit_pips = max(take_profit_pips, cfg_floor["min_tp"], int(stop_loss_pips * cfg_floor["tp_ratio"]))
         volume = calculate_position_size(balance, stop_loss_pips, symbol_info)
         point = symbol_info.get("point", 0.00001)
         digits = symbol_info.get("digits", 5)
@@ -226,10 +243,16 @@ def _check_pre_trade_guards(_action: str) -> StrategyResult | None:
 
 
 def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
-    """Applique les filtres pre-trade: confiance, max positions, spread, circuit breaker, RSI/BB."""
+    """Applique les filtres pre-trade: confiance, max positions, spread, circuit breaker, RSI/BB.
+
+    v4.1: Ajoute le filtre symboles desactives (_DISABLED_SYMBOLS) et anti-range (_is_ranging_market)."""
     confidence = decision["confidence"]
     if confidence < settings.min_confidence_threshold:
         logger.info(f"Confiance {confidence}% < seuil {settings.min_confidence_threshold}%")
+        return False
+    # v4.1: Symboles desactives
+    if settings.trading_symbol in _DISABLED_SYMBOLS:
+        logger.info(f"Symbole {settings.trading_symbol} temporairement desactive - pas d'execution")
         return False
     if count_open_positions() >= settings.max_open_positions:
         logger.info("Max positions atteint - pas d'execution")
@@ -242,6 +265,10 @@ def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
     action = decision.get("action", "")
     if action in ("BUY", "SELL") and _is_cooldown_active(settings.trading_symbol, action):
         logger.info(f"Cooldown actif pour {settings.trading_symbol} {action} - pas d'execution")
+        return False
+    # v4.1: Filtre anti-range - HOLD si ADX < 25 depuis 3+ periodes (evite de trader dans un range)
+    if action in ("BUY", "SELL") and _is_ranging_market(decision):
+        logger.info(f"Marche en range (ADX bas) - pas d'execution pour {settings.trading_symbol}")
         return False
     if _circuit_breaker_active():
         logger.info("Circuit breaker actif - pas d'execution")
@@ -330,6 +357,36 @@ def _set_circuit_breaker_until(hours: int = 4) -> None:
         pass
 
 
+def _is_ranging_market(decision: dict) -> bool:
+    """v4.1: Detecte un marche en range (ADX < seuil pendant N periodes consecutives).
+
+    Utilise _RANGING_ADX_THRESHOLD (25.0) et _RANGING_CONSECUTIVE_BARS (3).
+    L'etat est suivi dans _ranging_state (en memoire, non persiste).
+    Retourne True si le marche est en range et qu'il faut bloquer les trades."""
+    indicators = decision.get("indicators", {})
+    adx = indicators.get("adx_14", 30) if indicators else 30
+    sym = settings.trading_symbol
+
+    if adx is None or adx > _RANGING_ADX_THRESHOLD:
+        # ADX normal: reset le compteur
+        _ranging_state[sym] = 0
+        return False
+
+    # ADX bas: incrementer le compteur
+    current = _ranging_state.get(sym, 0) + 1
+    _ranging_state[sym] = current
+
+    if current >= _RANGING_CONSECUTIVE_BARS:
+        logger.info(
+            f"RANGE DETECTE pour {sym}: ADX={adx:.1f} < {_RANGING_ADX_THRESHOLD} "
+            f"depuis {current} periodes - trading bloque"
+        )
+        return True
+
+    logger.debug(f"ADX bas pour {sym}: {adx:.1f}, compteur={current}/{_RANGING_CONSECUTIVE_BARS}")
+    return False
+
+
 def _circuit_breaker_active() -> bool:
     """Verifie si le circuit breaker est actif (HIGH-08)."""
     try:
@@ -387,16 +444,20 @@ def _apply_breakeven(pos: dict) -> bool:
         profit_distance_pips = (tick.bid - entry_price) / (10 * sym_info.point)
         # v3.0: Breakeven a 1.2R (couvre commissions/swaps + marge de respiration)
         if profit_distance_pips >= sl_distance_pips * 1.2 and current_sl < entry_price:
-            _modify_sl(ticket, entry_price)
-            logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a l'entree {entry_price}")
+            # Offset de 1.5 pips pour couvrir le spread et la commission
+            breakeven_price = round(entry_price + (15 * sym_info.point), sym_info.digits)
+            _modify_sl(ticket, breakeven_price)
+            logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a {breakeven_price}")
             return True
     else:
         sl_distance_pips = (current_sl - entry_price) / (10 * sym_info.point) if current_sl else 0
         profit_distance_pips = (entry_price - tick.ask) / (10 * sym_info.point)
         # v3.0: Breakeven a 1.2R
         if profit_distance_pips >= sl_distance_pips * 1.2 and current_sl > entry_price:
-            _modify_sl(ticket, entry_price)
-            logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a l'entree {entry_price}")
+            # Offset de 1.5 pips pour couvrir le spread et la commission
+            breakeven_price = round(entry_price - (15 * sym_info.point), sym_info.digits)
+            _modify_sl(ticket, breakeven_price)
+            logger.info(f"BREAKEVEN: ticket {ticket}, SL deplace a {breakeven_price}")
             return True
     return False
 
@@ -461,7 +522,7 @@ def _check_time_exit(pos: dict) -> bool:
         rates = mt5.copy_rates_from_pos(settings.trading_symbol, timeframe, 0, 20)
         if rates is None or len(rates) < 20:
             # Fallback: chronometre 4h
-            db = get_db()
+            db = get_db(symbol=settings.trading_symbol)
             row = db.execute("SELECT opened_at FROM trades WHERE ticket = ?", [ticket]).fetchone()
             if row is None:
                 return False
@@ -475,24 +536,15 @@ def _check_time_exit(pos: dict) -> bool:
         close_prices = [r[4] for r in rates]
         highs = [r[2] for r in rates]
         lows = [r[3] for r in rates]
-        sma20 = sum(close_prices) / len(close_prices)
         current_price = tick.bid if pos.get("type") == mt5.POSITION_TYPE_BUY else tick.ask
 
         if pos.get("type") == mt5.POSITION_TYPE_BUY:
-            # BUY: sortir si le prix passe sous SMA20
-            if current_price < sma20:
-                logger.info(f"TIME EXIT: ticket {ticket}, BUY casse SMA20 ({current_price:.5f} < {sma20:.5f})")
-                return True
             # Structure break: prix casse le plus bas des 20 dernieres bougies
             lowest_20 = min(lows)
             if current_price < lowest_20:
                 logger.info(f"TIME EXIT: ticket {ticket}, BUY casse lowest 20-bar ({current_price:.5f} < {lowest_20:.5f})")
                 return True
         else:
-            # SELL: sortir si le prix passe au-dessus SMA20
-            if current_price > sma20:
-                logger.info(f"TIME EXIT: ticket {ticket}, SELL casse SMA20 ({current_price:.5f} > {sma20:.5f})")
-                return True
             # Structure break: prix casse le plus haut des 20 dernieres bougies
             highest_20 = max(highs)
             if current_price > highest_20:
@@ -500,7 +552,7 @@ def _check_time_exit(pos: dict) -> bool:
                 return True
 
         # Securite: stagnation totale >4h
-        db = get_db()
+        db = get_db(symbol=settings.trading_symbol)
         row = db.execute("SELECT opened_at FROM trades WHERE ticket = ?", [ticket]).fetchone()
         if row is not None:
             opened = dt.fromisoformat(row[0])

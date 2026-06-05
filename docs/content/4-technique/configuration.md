@@ -2,6 +2,42 @@
 
 Le bot est configure via un fichier `.env` a la racine du projet. Les parametres sont charges par `src/config.py` qui utilise `pydantic-settings` pour la validation type-safe.
 
+## Parametres SL/TP par symbole (v4.1)
+
+Les parametres de stop loss et take profit sont definis dans `src/ai/strategy.py` - `_ATR_SL_CONFIG` et ne sont **pas** configurables via `.env`. Ils sont ajustes manuellement en fonction des caracteristiques de chaque symbole.
+
+| Symbole | atr_mult | min_sl (pips) | min_tp (pips) | tp_ratio |
+|---|---:|---:|---:|---:|
+| XAUUSD | 0.5 | 150 | 300 | 2.0 |
+| EURUSD | 1.5 | 15 | 30 | 2.0 |
+| GBPUSD | 1.8 | 25 | 50 | 2.0 |
+| AUDUSD | 1.5 | 15 | 30 | 2.0 |
+| USDJPY | 1.8 | 30 | 60 | 2.0 |
+| USDCHF | 1.5 | 15 | 30 | 2.0 |
+
+**Changements v4.1** :
+- GBPUSD : `min_sl` 18 → 25, `atr_mult` 1.5 → 1.8
+- USDJPY : `min_sl` 20 → 30, `atr_mult` 1.5 → 1.8
+
+## Parametres anti-range (v4.1)
+
+Definis dans `src/ai/strategy.py` :
+
+| Parametre | Valeur | Description |
+|---|---|---|
+| `_RANGING_ADX_THRESHOLD` | 25.0 | Seuil ADX en dessous duquel le marche est sans tendance |
+| `_RANGING_CONSECUTIVE_BARS` | 3 | Nombre de periodes consecutives avant blocage |
+
+## Symboles desactives (v4.1)
+
+Defini dans `src/ai/strategy.py` :
+
+```python
+_DISABLED_SYMBOLS: set[str] = {"XAUUSD"}
+```
+
+Ajouter ou retirer des symboles en modifiant ce set. Les symboles desactives ne recoivent pas d'ordres BUY/SELL mais continuent d'etre analyses.
+
 ## Fichier `.env`
 
 Creez un fichier `.env` a la racine du projet en copiant l'exemple ci-dessous :

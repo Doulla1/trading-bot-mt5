@@ -1,3 +1,20 @@
+# Todo - Correctifs post-analyse 03-05 Juin 2026
+
+**Debut** : 2026-06-05 00:46
+**Fin** : 2026-06-05 01:09
+
+## Taches
+
+- [x] Forcer SL minimum imperatif dans execute_decision (bypass IA)
+- [x] Reparer contamination DB (symbole explicite dans get_db/log_trade)
+- [x] Ajouter filtre anti-range (HOLD si ADX < 25 depuis 3+ periodes)
+- [x] Desactiver XAUUSD temporairement
+- [x] Augmenter SL minimum GBPUSD et USDJPY
+- [x] Mettre a jour les tests
+- [x] Mettre a jour la documentation
+
+---
+
 # Todo - Analyse approfondie trades 03-04 Juin 2026
 
 **Debut** : 2026-06-04 12:30

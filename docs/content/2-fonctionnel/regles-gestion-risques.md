@@ -16,14 +16,21 @@ flowchart TD
     H -- Oui --> I[Fermer toutes les positions]
     H -- Non --> J{Action BUY/SELL ?}
     J -- Non --> K[HOLD - pas d'action]
-    J -- Oui --> L{Spread <= 30 ?}
-    L -- Non --> M[Trade ignore]
-    L -- Oui --> N{Confiance >= 70% ?}
-    N -- Non --> O[Trade ignore]
-    N -- Oui --> P{Max positions < 1 ?}
+    J -- Oui --> L{Symbole desactive ?}
+    L -- Oui --> M[Trade bloque - XAUUSD exclu]
+    L -- Non --> N{Marche en range ? ADX < 25 x3}
+    N -- Oui --> O[HOLD force - anti-range]
+    N -- Non --> P{Spread <= 30 ?}
     P -- Non --> Q[Trade ignore]
-    P -- Oui --> R[Executer ordre + SL/TP]
-    R --> S[Gestion active: Breakeven 1.2R, Trailing, Time Exit structure]
+    P -- Oui --> R{Confiance >= 70% ?}
+    R -- Non --> S[Trade ignore]
+    R -- Oui --> T{Max positions < 1 ?}
+    T -- Non --> U[Trade ignore]
+    T -- Oui --> V{Hard SL Floor: SL >= min_sl ?}
+    V -- Non --> W[SL force au minimum]
+    W --> X[Executer ordre + SL/TP]
+    V -- Oui --> X
+    X --> Y[Gestion active: Breakeven 1.2R, Trailing, Time Exit structure]
 ```
 
 ### 1. Marche ouvert
@@ -197,6 +204,70 @@ def _check_time_exit(pos) -> bool:
 | SELL | Prix > SMA20 (casse la tendance baissiere) |
 | SELL | Swing high recent > swing high precedent (structure LH cassee) |
 | Tous | Age > 4h ET P&L quasi nul (< 0.50) - securite absolue |
+
+### 16. Hard SL Floor (v4.1)
+
+**Regle** : Le SL ne peut JAMAIS etre inferieur au minimum defini par symbole dans `_ATR_SL_CONFIG`.
+
+Meme si `_get_atr_based_sl_tp()` calcule theoriquement un SL >= `min_sl`, un deuxieme controle imperatif est effectue juste avant l'execution de l'ordre. Si le SL est en dessous du minimum, il est force a `min_sl` et un avertissement est loggue.
+
+```python
+cfg_floor = _ATR_SL_CONFIG.get(sym, _ATR_SL_CONFIG["EURUSD"])
+if stop_loss_pips < cfg_floor["min_sl"]:
+    logger.warning(f"SL HARD FLOOR pour {sym}: {stop_loss_pips} -> {cfg_floor['min_sl']} pips")
+    stop_loss_pips = cfg_floor["min_sl"]
+    take_profit_pips = max(take_profit_pips, cfg_floor["min_tp"], int(stop_loss_pips * cfg_floor["tp_ratio"]))
+```
+
+**Minimums SL par symbole (v4.1)** :
+
+| Symbole | min_sl (pips) | Changement v4.1 |
+|---|---|---|
+| XAUUSD | 150 | - |
+| EURUSD | 15 | - |
+| GBPUSD | 25 | 18 → 25 |
+| AUDUSD | 15 | - |
+| USDJPY | 30 | 20 → 30 |
+| USDCHF | 15 | - |
+
+**Probleme resolu** : l'IA suggerait SL=20 pips sur XAUUSD, ce qui etait systematiquement stoppe par le bruit normal de l'or (~150 pips de volatilite). Le Hard Floor empeche ces SL irrealistes quel que soit le chemin de code.
+
+### 17. Filtre Anti-Range (v4.1)
+
+**Regle** : Bloquer tous les BUY/SELL quand le marche est detecte comme etant en range (sans tendance directionnelle) depuis 3+ periodes d'analyse.
+
+**Algorithme** : la fonction `_is_ranging_market()` suit l'ADX par symbole :
+
+- ADX >= 25 : marche directionnel → compteur reset, trading autorise
+- ADX < 25 : marche potentiellement rangeant → compteur +1
+- Compteur >= 3 : marche en range confirme → HOLD force, pas de BUY/SELL
+
+```python
+_RANGING_ADX_THRESHOLD: float = 25.0
+_RANGING_CONSECUTIVE_BARS: int = 3
+_ranging_state: dict[str, int] = {}  # sym -> compteur de periodes ADX < seuil
+```
+
+**Justification** : dans un marche sans tendance, le prix oscille entre support et resistance sans direction claire. Les signaux de l'IA sont moins fiables dans ces conditions (taux d'echec eleve sur les analyses du 03-05 Juin 2026).
+
+### 18. XAUUSD temporairement desactive (v4.1)
+
+**Regle** : L'or (XAUUSD) est temporairement exclu du trading. Toute decision BUY/SELL est bloquee dans `_passes_trade_filters()`.
+
+```python
+_DISABLED_SYMBOLS: set[str] = {"XAUUSD"}
+
+if settings.trading_symbol in _DISABLED_SYMBOLS:
+    logger.info(f"Symbole {settings.trading_symbol} temporairement desactive - pas d'execution")
+    return False
+```
+
+**Justification** : XAUUSD a accumule -10.15 de pertes sur 5 trades (tous perdants) entre le 03 et le 05 Juin 2026. Le modele IA actuel ne capture pas correctement :
+- La volatilite intraday extreme de l'or (ATR ~450 pips, contre ~10 pips pour EURUSD)
+- La correlation inverse avec le Dollar Index (DXY)
+- Les flux safe-haven qui invalident l'analyse technique classique
+
+Reactivation prevue apres fine-tuning specifique a l'or.
 
 - **Avant v3.0** : timer arbitraire de 120 minutes (ferme mecaniquement les perdants)
 - **Apres v3.0** : logique de structure de marche - laisse les consolidations saines respirer

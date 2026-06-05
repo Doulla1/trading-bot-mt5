@@ -178,3 +178,74 @@ if decision["action"] not in ("BUY", "SELL", "HOLD", "CLOSE"):
 - `_get_daily_pnl()` retourne 0.0
 - `get_statistics()` retourne des zeros
 - Aucun comportement specifique, le bot commence a analyser immediatement
+
+---
+
+## Scenario : Marche en range (anti-range filter, v4.1)
+
+**Condition** : L'ADX est inferieur a 25 depuis 3 periodes d'analyse consecutives pour un symbole donne.
+
+**Comportement** :
+
+1. Cycle 1 : ADX=22 → compteur interne = 1, trading encore autorise, log debug
+2. Cycle 2 : ADX=20 → compteur interne = 2, trading encore autorise (surveillance)
+3. Cycle 3 : ADX=18 → compteur interne = 3, **RANGE DETECTE**
+4. Toutes les decisions BUY/SELL sont bloquees dans `_passes_trade_filters()`
+5. Seules les actions HOLD et CLOSE sont autorisees
+6. Cycle 4 : ADX=26 → compteur reset a 0, trading re-active
+
+**Log attendu** :
+```
+RANGE DETECTE pour EURUSD: ADX=18.0 < 25.0 depuis 3 periodes - trading bloque
+Marche en range (ADX bas) - pas d'execution pour EURUSD
+```
+
+**Cas particuliers** :
+- L'etat est en memoire uniquement (pas de persistance). Un redemarrage reset le compteur.
+- Chaque symbole a son propre compteur dans `_ranging_state`
+- Si une position est deja ouverte quand le range est detecte, la gestion active (breakeven/trailing/time-exit) continue normalement
+
+---
+
+## Scenario : Symbole desactive (v4.1)
+
+**Condition** : Le symbole est dans `_DISABLED_SYMBOLS` (actuellement XAUUSD).
+
+**Comportement** :
+
+1. La decision IA est produite normalement (analyse, screenshot, DeepSeek)
+2. `execute_decision()` appelle `_passes_trade_filters()`
+3. `_passes_trade_filters()` detecte `trading_symbol in _DISABLED_SYMBOLS`
+4. Toute action BUY/SELL est bloquee, log :
+   ```
+   Symbole XAUUSD temporairement desactive - pas d'execution
+   ```
+5. L'analyse est enregistree dans `analysis_logs` avec `was_executed = 0`
+6. Les actions CLOSE restent autorisees (pour fermer une position existante)
+
+**Reactivation** : retirer le symbole de `_DISABLED_SYMBOLS` dans `src/ai/strategy.py`.
+
+---
+
+## Scenario : Hard SL Floor declenche (v4.1)
+
+**Condition** : Le SL calcule (par DeepSeek puis ajuste par ATR) est inferieur au `min_sl` du symbole.
+
+**Exemple XAUUSD** :
+
+1. DeepSeek suggere SL=20 pips, TP=40 pips
+2. `_get_atr_based_sl_tp()` : ATR=450 pips, ATR-based SL = 450 * 0.5 = 225, SL final = max(20, 225) = 225
+3. Mais l'ATR est indisponible ce cycle → ATR-based SL = 150 (min_sl), SL final = max(20, 150) = 150
+4. Hard Floor verifie : SL=150 >= min_sl=150 → OK, pas de correction
+
+**Exemple avec correction** :
+
+1. DeepSeek suggere SL=80 pips sur XAUUSD, ATR indisponible
+2. `_get_atr_based_sl_tp()` retourne SL=150 (min_sl)
+3. Mais un bug de passage de parametre reduit SL a 80 avant l'execution
+4. Hard Floor detecte 80 < 150 → **correction forcee** a 150 pips
+5. Log :
+   ```
+   SL HARD FLOOR pour XAUUSD: 80 -> 150 pips (IA=80, ATR ajuste insuffisant)
+   ```
+   TP est aussi recalcule : max(TP_initial, min_tp=300, 150 * 2.0) = 300

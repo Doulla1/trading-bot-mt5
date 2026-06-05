@@ -13,10 +13,17 @@ _dbs: dict[str, sqlite3.Connection] = {}
 _db_lock = threading.Lock()
 
 
-def get_db() -> sqlite3.Connection:
-    """Retourne la connexion SQLite pour le symbole courant (BUG-1: isolation par symbole).
+def get_db(symbol: str | None = None) -> sqlite3.Connection:
+    """Retourne la connexion SQLite pour un symbole donne.
+    v4.1: Accepte un symbole explicite pour eviter la contamination entre DB.
     Utilise un dict keyed par db_path pour que chaque symbole ecrive dans sa propre DB."""
-    path = str(settings.db_path)
+    # v4.1: Si un symbole est fourni explicitement, on l'utilise
+    # sinon on utilise le trading_symbol courant (retrocompatibilite)
+    if symbol is not None:
+        sym_dir = symbol.lower()
+        path = str(settings.project_root / "data" / sym_dir / "trading.db")
+    else:
+        path = str(settings.db_path)
     if path not in _dbs:
         with _db_lock:
             if path not in _dbs:
@@ -97,8 +104,9 @@ def log_analysis(symbol, timeframe, decision, screenshot_path, indicators, calen
 
 
 def log_trade_open(ticket, symbol, direction, volume, open_price, stop_loss, take_profit, confidence, reasoning) -> int:
-    """Enregistre l'ouverture d'un trade. Retourne l'ID."""
-    db = get_db()
+    """Enregistre l'ouverture d'un trade. Retourne l'ID.
+    v4.1: Utilise le symbole explicite pour ecrire dans la bonne DB."""
+    db = get_db(symbol=symbol)
     cursor = db.execute(
         """INSERT INTO trades (ticket, symbol, direction, volume, opened_at, open_price, stop_loss, take_profit, confidence, reasoning)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -108,9 +116,10 @@ def log_trade_open(ticket, symbol, direction, volume, open_price, stop_loss, tak
     return cursor.lastrowid
 
 
-def log_trade_close(ticket, close_price, profit) -> None:
-    """Met a jour un trade avec les infos de fermeture."""
-    db = get_db()
+def log_trade_close(ticket, close_price, profit, symbol: str | None = None) -> None:
+    """Met a jour un trade avec les infos de fermeture.
+    v4.1: Accepte un symbole explicite pour ecrire dans la bonne DB."""
+    db = get_db(symbol=symbol)
     db.execute("UPDATE trades SET closed_at = ?, close_price = ?, profit = ? WHERE ticket = ? AND closed_at IS NULL",
                (datetime.now().isoformat(), close_price, profit, ticket))
     db.commit()

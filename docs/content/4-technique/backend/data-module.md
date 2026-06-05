@@ -9,9 +9,47 @@ src/data/
   __init__.py
   calendar.py              # Orquestrateur calendrier (cascade multi-sources)
   investing_calendar.py    # Scrapeur Investing.com (Playwright)
-  database.py              # SQLite singleton + CRUD
+  database.py              # SQLite multi-symboles (v4.1) + CRUD
   models.py                # Dataclasses
 ```
+
+## Architecture multi-symboles (v4.1)
+
+### Probleme resolu : contamination entre bases de donnees
+
+Avant v4.1, le bot multi-symboles (`run_multi.py`) ecrivait certains trades dans `data/eurusd/trading.db` quel que soit le symbole reellement trade. La cause etait que `get_db()` utilisait toujours `settings.db_path` (pointe vers `data/{trading_symbol}/trading.db`) et que `trading_symbol` n'etait pas correctement propage lors des appels depuis le scheduler.
+
+### Solution : `get_db(symbol=...)` explicite
+
+```python
+def get_db(symbol: str | None = None) -> sqlite3.Connection:
+    """Retourne la connexion SQLite pour un symbole donne.
+    v4.1: Accepte un symbole explicite pour eviter la contamination entre DB."""
+    if symbol is not None:
+        sym_dir = symbol.lower()
+        path = str(settings.project_root / "data" / sym_dir / "trading.db")
+    else:
+        path = str(settings.db_path)  # retrocompatibilite
+```
+
+**Exemple de routage** :
+
+| Appel | Chemin DB |
+|---|---|
+| `get_db(symbol="EURUSD")` | `data/eurusd/trading.db` |
+| `get_db(symbol="GBPUSD")` | `data/gbpusd/trading.db` |
+| `get_db(symbol="XAUUSD")` | `data/xauusd/trading.db` |
+| `get_db()` (sans argument) | `data/{trading_symbol}/trading.db` (retrocompatibilite) |
+
+### Fonctions impactees
+
+| Fonction | Changement v4.1 |
+|---|---|
+| `get_db(symbol)` | Accepte un parametre `symbol` optionnel |
+| `log_trade_open(..., symbol)` | Passe `symbol` a `get_db()` pour ecrire dans la bonne DB |
+| `log_trade_close(..., symbol)` | Passe `symbol` a `get_db()` pour ecrire dans la bonne DB |
+| `reconcile_closed_positions(sym)` | Passe `sym` a `get_db()` et `log_trade_close()` |
+| `run_symbol(cfg)` | Passe `cfg["symbol"]` a `log_trade_open()` |
 
 ## `calendar.py` - Orquestrateur calendrier economique (v3.0)
 
@@ -82,8 +120,42 @@ return [ev for ev in events if ev.get("impact") in ("high", "medium") and ev.get
 
 - Table : `calendar_cache(date TEXT PK, events_json TEXT, fetched_at TEXT)`
 - TTL : 4 heures
-- Inseresion : `INSERT OR REPLACE`
+- Insertion : `INSERT OR REPLACE`
 - Le cache est persiste entre les redemarrages du bot
+
+---
+
+## Schema de la base de donnees
+
+Chaque symbole a sa propre base `data/{symbole}/trading.db` avec les tables suivantes :
+
+### `trades`
+
+| Colonne | Type | Description |
+|---|---|---|
+| `id` | INTEGER PK | Identifiant auto-increment |
+| `ticket` | INTEGER | Ticket MT5 du trade |
+| `symbol` | TEXT | Symbole (EURUSD, GBPUSD, ...) |
+| `direction` | TEXT | BUY ou SELL |
+| `volume` | REAL | Taille de la position en lots |
+| `opened_at` | TEXT | Timestamp ISO d'ouverture |
+| `open_price` | REAL | Prix d'entree |
+| `stop_loss` | REAL | Niveau du stop loss |
+| `take_profit` | REAL | Niveau du take profit |
+| `confidence` | INTEGER | Confiance IA (0-100) |
+| `reasoning` | TEXT | Raisonnement de l'IA |
+| `closed_at` | TEXT | Timestamp ISO de fermeture (NULL si ouvert) |
+| `close_price` | REAL | Prix de sortie (NULL si ouvert) |
+| `profit` | REAL | Profit/Perte en devise du compte (NULL si ouvert) |
+
+### `bot_state`
+
+| Colonne | Type | Description |
+|---|---|---|
+| `key` | TEXT PK | Cle de l'etat (ex: `circuit_breaker_until`, `cooldown_EURUSD_BUY`) |
+| `value` | TEXT | Valeur (souvent timestamp ISO) |
+
+Utilise par : circuit breaker, cooldown post TIME EXIT.
 
 ---
 

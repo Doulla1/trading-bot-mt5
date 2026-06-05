@@ -24,7 +24,7 @@ from src.data.calendar import fetch_events, filter_relevant_events
 from src.data.database import get_db, log_analysis, log_trade_open, log_trade_close, get_recent_trades, get_statistics
 
 
-# Configuration des 6 symboles
+# Configuration des symboles (Majeures + Crosses pour diversification)
 SYMBOLS = [
     {"symbol": "EURUSD", "timeframe": "M15", "magic": 73456, "interval_min": 15},
     {"symbol": "GBPUSD", "timeframe": "M15", "magic": 73457, "interval_min": 15},
@@ -32,6 +32,10 @@ SYMBOLS = [
     {"symbol": "USDJPY", "timeframe": "M15", "magic": 73459, "interval_min": 15},
     {"symbol": "USDCHF", "timeframe": "M15", "magic": 73460, "interval_min": 15},
     {"symbol": "XAUUSD", "timeframe": "H1",   "magic": 73461, "interval_min": 60},
+    # --- CROSSES NON-USD ---
+    {"symbol": "EURGBP", "timeframe": "M15", "magic": 73462, "interval_min": 15},
+    {"symbol": "EURJPY", "timeframe": "M15", "magic": 73463, "interval_min": 15},
+    {"symbol": "GBPJPY", "timeframe": "M15", "magic": 73464, "interval_min": 15},
 ]
 
 # Compteurs pour savoir quel symbole doit tourner a chaque round
@@ -64,11 +68,20 @@ def _get_session_context() -> dict:
 def _reconcile_closed_positions(sym: str) -> None:
     """Reconciliation des trades fermes (BUG-2: utiliser history_deals_get(position=) et chercher le deal de sortie)."""
     import MetaTrader5 as mt5
+    from datetime import datetime, timedelta
     try:
         db = get_db()
         open_tickets = db.execute(
             "SELECT ticket FROM trades WHERE closed_at IS NULL AND symbol = ?", [sym]
         ).fetchall()
+        
+        if not open_tickets:
+            return
+            
+        # Charger l'historique MT5 pour le mois courant pour remplir le cache
+        now = datetime.now()
+        mt5.history_deals_get(now - timedelta(days=30), now + timedelta(days=1))
+        
         for row in open_tickets:
             ticket = row[0]
             if mt5.positions_get(ticket=ticket) is None or len(mt5.positions_get(ticket=ticket)) == 0:
@@ -78,11 +91,13 @@ def _reconcile_closed_positions(sym: str) -> None:
                 if deals:
                     close_deal = next((d for d in deals if d.entry == 1), None)
                 if close_deal:
-                    log_trade_close(ticket, close_deal.price, close_deal.profit)
+                    total_profit = close_deal.profit + close_deal.commission + close_deal.swap
+                    log_trade_close(ticket, close_deal.price, total_profit, symbol=sym)
                 else:
-                    log_trade_close(ticket, 0.0, 0.0)
-    except Exception:
-        pass
+                    # Ne pas logguer 0.0 si on ne trouve pas le deal ! Reessayer plus tard
+                    logger.warning(f"Position {ticket} fermee mais deal introuvable, tentative differee")
+    except Exception as e:
+        logger.error(f"Erreur reconciliation pour {sym}: {e}")
 
 
 def _has_high_impact_news_soon(events: list) -> bool:

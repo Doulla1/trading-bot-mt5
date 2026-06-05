@@ -14,13 +14,13 @@ from src.ai.ocr import extract_chart_structure
 from src.ai.analyzer import make_decision, make_decision_fast
 from src.ai.strategy import execute_decision, manage_open_positions
 from src.data.calendar import fetch_events, filter_relevant_events
-from src.data.database import get_db, log_analysis, log_trade_open, log_trade_close, get_recent_trades, get_statistics, log_trade_close
+from src.data.database import get_db, log_analysis, log_trade_open, log_trade_close, get_recent_trades, get_statistics
 
 
 def reconcile_closed_positions(sym: str) -> int:
     """Detecte et log les fermetures SL/TP survenues dans MT5 (CRITICAL-05, HIGH-05)."""
     try:
-        db = get_db()
+        db = get_db(symbol=sym)
         open_tickets = db.execute(
             "SELECT ticket FROM trades WHERE closed_at IS NULL AND symbol = ?", [sym]
         ).fetchall()
@@ -44,15 +44,15 @@ def reconcile_closed_positions(sym: str) -> int:
                     # Chercher specifiquement le deal de SORTIE (entry=1 = OUT)
                     close_deal = next((d for d in deals if d.entry == 1), None)
                     if close_deal:
-                        log_trade_close(deal_ticket, close_deal.price, close_deal.profit)
+                        log_trade_close(deal_ticket, close_deal.price, close_deal.profit, symbol=sym)
                     else:
                         # Fallback: prendre le dernier deal (souvent le OUT)
                         last_deal = deals[-1]
-                        log_trade_close(deal_ticket, last_deal.price, last_deal.profit)
+                        log_trade_close(deal_ticket, last_deal.price, last_deal.profit, symbol=sym)
                     reconciled += 1
                 else:
                     # Position disparue sans historique: marquer comme fermee
-                    log_trade_close(deal_ticket, 0.0, 0.0)
+                    log_trade_close(deal_ticket, 0.0, 0.0, symbol=sym)
                     reconciled += 1
         if reconciled:
             logger.info(f"Reconciliation: {reconciled} trade(s) ferme(s) mis a jour")

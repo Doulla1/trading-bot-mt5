@@ -1,4 +1,4 @@
-# Module IA v2.1 : ocr.py, analyzer.py, strategy.py, prompts.py
+# Module IA v4.1 : ocr.py, analyzer.py, strategy.py, prompts.py
 
 ## Vue d'ensemble
 
@@ -12,7 +12,7 @@ src/ai/
   ocr.py         # v2.0 - GPT-4o-mini: extraction visuelle uniquement
   analyzer.py    # v2.0 - DeepSeek V4 Pro: decision avec memoire 1M
   prompts.py     # v2.0 - Prompts OCR + Decision + Memoire + Performance
-  strategy.py    # v2.0 - Risk management + position management
+  strategy.py    # v4.1 - Risk management + position management + anti-range
   vision.py      # Legacy - fallback GPT-4o-mini (deprecie)
 ```
 
@@ -184,16 +184,100 @@ Les filtres RSI/Bollinger Band anti-tendance sont desormais conditionnes au regi
 
 **Apres v3.0** : en tendance forte, le prix surfe sur les bandes de Bollinger et le RSI reste dans les extremes sans corriger. Le bot suit la tendance au lieu de la combattre.
 
-### Gardes pre-trade
+### Configuration SL/TP par symbole (v4.0, ajustee v4.1)
 
-| Filtre | Seuil |
-|---|---|
-| Marche ouvert | `trade_mode == FULL` |
-| Perte jour (flottante incluse) | < 3% du capital |
-| Confiance IA | >= 70% |
-| Max positions | 1 |
-| Spread | <= 30 points |
-| Circuit breaker | 4 pertes consecutives → pause 4h |
+Chaque symbole a des parametres SL/TP specifiques bases sur l'ATR. Les valeurs ci-dessous sont les minimums absolus (`min_sl`) et les multiplicateurs ATR appliques.
+
+**Fichier** : `src/ai/strategy.py` - `_ATR_SL_CONFIG`
+
+| Symbole | atr_mult | min_sl (pips) | min_tp (pips) | tp_ratio |
+|---|---:|---:|---:|---:|
+| XAUUSD | 0.5 | 150 | 300 | 2.0 |
+| EURUSD | 1.5 | 15 | 30 | 2.0 |
+| GBPUSD | 1.8 | 25 | 50 | 2.0 |
+| AUDUSD | 1.5 | 15 | 30 | 2.0 |
+| USDJPY | 1.8 | 30 | 60 | 2.0 |
+| USDCHF | 1.5 | 15 | 30 | 2.0 |
+
+**Changements v4.1** :
+- GBPUSD : `min_sl` passe de 18 a 25 pips, `atr_mult` de 1.5 a 1.8 (volatilite GBP accrue)
+- USDJPY : `min_sl` passe de 20 a 30 pips, `atr_mult` de 1.5 a 1.8 (JPY plus volatile en 2026)
+
+### Hard SL Floor (v4.1)
+
+**Regle** : Le SL calcule par l'ATR et l'IA ne peut JAMAIS descendre en dessous du `min_sl` defini dans `_ATR_SL_CONFIG`.
+
+Meme si `_get_atr_based_sl_tp()` retourne theoriquement deja une valeur >= `min_sl`, un deuxieme controle est effectue dans `execute_decision()` pour garantir qu'aucun chemin de code ne permet de passer un SL inferieur au minimum.
+
+```python
+# v4.1: HARD FLOOR - l'IA ne peut JAMAIS reduire le SL en dessous du minimum config
+cfg_floor = _ATR_SL_CONFIG.get(sym, _ATR_SL_CONFIG["EURUSD"])
+if stop_loss_pips < cfg_floor["min_sl"]:
+    logger.warning(f"SL HARD FLOOR pour {sym}: {stop_loss_pips} -> {cfg_floor['min_sl']} pips")
+    stop_loss_pips = cfg_floor["min_sl"]
+    take_profit_pips = max(take_profit_pips, cfg_floor["min_tp"], int(stop_loss_pips * cfg_floor["tp_ratio"]))
+```
+
+**Probleme resolu** : l'IA suggerait occasionnellement SL=20 pips sur XAUUSD (ou min_sl=150), ce qui causait des stop-outs prematures. Le Hard Floor empeche ces SL irrealistes.
+
+### Filtre Anti-Range (v4.1)
+
+**Fonction** : `_is_ranging_market(decision) -> bool`
+
+Bloque les entrees (BUY/SELL) quand le marche est detecte comme etant en range (sans tendance directionnelle).
+
+**Algorithme** :
+
+```mermaid
+stateDiagram-v2
+    [*] --> Normal: ADX >= 25
+    Normal --> Comptage: ADX < 25 (compteur=1)
+    Comptage --> Comptage: ADX < 25 (compteur++)
+    Comptage --> Bloque: compteur >= 3
+    Bloque --> Bloque: ADX < 25 (HOLD force)
+    Bloque --> Normal: ADX >= 25 (reset compteur)
+    Comptage --> Normal: ADX >= 25 (reset compteur)
+```
+
+| Etat | ADX | Compteur | Action |
+|---|---:|---|---|
+| Normal | >= 25 | 0 | Trading autorise |
+| Comptage | < 25 | 1-2 | Trading autorise (surveillance) |
+| Bloque | < 25 | >= 3 | HOLD force (pas de BUY/SELL) |
+
+**Configuration** :
+- `_RANGING_ADX_THRESHOLD = 25.0` : seuil ADX en dessous duquel le marche est considere sans tendance
+- `_RANGING_CONSECUTIVE_BARS = 3` : nombre de periodes consecutives avant blocage
+
+**Stockage d'etat** : le dictionnaire `_ranging_state` (en memoire) suit le compteur par symbole. Le compteur est reinitialise a chaque ADX >= 25.
+
+### Symboles desactives (v4.1)
+
+**Fonction** : `_DISABLED_SYMBOLS = {"XAUUSD"}` dans `_passes_trade_filters()`
+
+Certains symboles peuvent etre temporairement desactives si le modele IA ne les comprend pas assez bien pour trader de maniere rentable.
+
+```python
+if settings.trading_symbol in _DISABLED_SYMBOLS:
+    logger.info(f"Symbole {settings.trading_symbol} temporairement desactive - pas d'execution")
+    return False
+```
+
+**Contexte v4.1** : XAUUSD a accumule -10.15 de pertes sur 5 trades (tous perdants). Le modele actuel ne capture pas correctement la dynamique de l'or (volatilite intraday extreme, correlation inverse USD, flux safe-haven). XAUUSD sera reactive quand un fine-tuning specifique a l'or sera disponible.
+
+### Gardes pre-trade (v4.1)
+
+| Filtre | Seuil | v4.1 |
+|---|---|---|
+| Marche ouvert | `trade_mode == FULL` | - |
+| Perte jour (flottante incluse) | < 3% du capital | - |
+| Confiance IA | >= 70% | - |
+| Max positions | 1 | - |
+| Spread | <= 30 points | - |
+| Cooldown post TIME EXIT | 30 minutes | v4.0 |
+| Symbole desactive | `_DISABLED_SYMBOLS` | **v4.1** |
+| Anti-range (ADX) | ADX < 25 depuis 3 periodes | **v4.1** |
+| Circuit breaker | 4 pertes consecutives → pause 4h | - |
 if not (5 <= decision["stop_loss_pips"] <= 100):   # rejete
 if decision["take_profit_pips"] < decision["stop_loss_pips"] * 1.5:  # rejete
 if decision["risk_level"] not in ("LOW", "MEDIUM", "HIGH"):           # rejete
