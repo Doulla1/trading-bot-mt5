@@ -92,7 +92,16 @@ def _reconcile_closed_positions(sym: str) -> None:
                     close_deal = next((d for d in deals if d.entry == 1), None)
                 if close_deal:
                     total_profit = close_deal.profit + close_deal.commission + close_deal.swap
-                    log_trade_close(ticket, close_deal.price, total_profit, symbol=sym)
+                    
+                    # Determiner la raison via le commentaire MT5 (souvent "sl", "tp", ou vide)
+                    reason = "EXPERT"
+                    comment = close_deal.comment.lower() if close_deal.comment else ""
+                    if "sl" in comment:
+                        reason = "SL"
+                    elif "tp" in comment:
+                        reason = "TP"
+                        
+                    log_trade_close(ticket, close_deal.price, total_profit, reason=reason, symbol=sym)
                 else:
                     # Ne pas logguer 0.0 si on ne trouve pas le deal ! Reessayer plus tard
                     logger.warning(f"Position {ticket} fermee mais deal introuvable, tentative differee")
@@ -170,26 +179,42 @@ def run_symbol(cfg: dict) -> None:
         logger.info(f"[{sym}] Marche ferme")
         return
 
-    # Indicateurs M15 + H1
+    # Indicateurs M15 + H1 + H4
     df_m15 = bridge.get_rates(sym, "M15", count=200)
     df_h1 = bridge.get_rates(sym, tf if tf == "H1" else "H1", count=100) if tf != "H1" else None
-    ind_data = indicators.compute_all(df_m15, df_h1)
-
-    # Chart genere
-    chart_path = chart_renderer.render_analysis_chart(df_m15, ind_data, sym)
+    df_h4 = bridge.get_rates(sym, "H4", count=50) if tf != "H4" and tf != "H1" else None
+    ind_data = indicators.compute_all(df_m15, df_h1, df_h4)
 
     # Calendrier
     all_events = fetch_events()
     relevant = filter_relevant_events(all_events, sym)
 
     if _has_high_impact_news_soon(relevant):
-        logger.info(f"[{sym}] News HIGH - pas d'execution")
+        logger.warning(f"[{sym}] News HIGH imminente (<30 min) - Mode protection active")
+        
+        # Liquidation d'urgence des positions ouvertes pour eviter le slippage
+        open_pos = executor.get_open_positions(sym)
+        if open_pos:
+            logger.warning(f"[{sym}] Cloture d'urgence de {len(open_pos)} position(s) ouverte(s) avant l'annonce !")
+            for pos in open_pos:
+                res = executor.close_position(pos["ticket"])
+                if res.success:
+                    logger.info(f"[{sym}] Trade {pos['ticket']} securise (Ferme avant News)")
+                    # Force la reconciliation immediate pour eviter le log 0.0
+                    _reconcile_closed_positions(sym)
+        
+        logger.info(f"[{sym}] Pas d'execution (pause pendant la tempete)")
         return
 
-    # OCR
+    # Chart genere et OCR (Rendu optionnel via USE_VISION_OCR pour eviter hallucinations et latence)
+    chart_path = None
     ocr_data = None
-    if chart_path:
-        ocr_data = extract_chart_structure(chart_path, sym, tf)
+    if settings.use_vision_ocr:
+        chart_path = chart_renderer.render_analysis_chart(df_m15, ind_data, sym)
+        if chart_path:
+            ocr_data = extract_chart_structure(chart_path, sym, tf)
+    else:
+        logger.debug(f"[{sym}] OCR desactive (settings.use_vision_ocr=False)")
 
     # DeepSeek
     open_positions = executor.get_open_positions(sym)

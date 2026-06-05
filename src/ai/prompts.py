@@ -79,11 +79,13 @@ def build_decision_prompt(symbol, timeframe, indicators, ocr_data,
         parts.append(f"  Dernier swing low: {structure['last_swing_low']}")
 
     # 6. MULTI-TIMEFRAME
-    if indicators.get("h1_trend") is not None:
+    if indicators.get("h1_trend") is not None or indicators.get("h4_trend") is not None:
         parts.append("--- CONTEXTE MULTI-TIMEFRAME ---")
-        parts.append(f"H1 Tendance: {indicators['h1_trend']}")
+        if indicators.get("h1_trend"):
+            parts.append(f"H1 Tendance: {indicators['h1_trend']}")
+        if indicators.get("h4_trend"):
+            parts.append(f"H4 Tendance: {indicators['h4_trend']}")
         parts.append(f"H1 RSI: {indicators.get('h1_rsi_14', 'N/A')}")
-        parts.append(f"H1 Close: {indicators.get('h1_close', 'N/A')}")
 
     # 7. REGIME DE MARCHE
     parts.append(f"--- REGIME ---")
@@ -109,7 +111,7 @@ def build_decision_prompt(symbol, timeframe, indicators, ocr_data,
 
     # 11. INSTRUCTIONS
     parts.append(f"""--- DECISION ---
-Analyse TOUTES les donnees (technique, Ichimoku, pivots, OCR du chart, patterns, structure, multi-timeframe, regime de marche, calendrier, historique).
+Analyse TOUTES les donnees (technique, Ichimoku, pivots, volume, structure, multi-timeframe, regime de marche, calendrier, historique).
 
 Regles:
 - CONFIDENCE elevee (>70) uniquement si TOUS les signaux convergent
@@ -197,20 +199,12 @@ def _format_indicators_v2(ind: dict) -> str:
         lines.append(f"Bollinger: {bb_state}")
 
     # --- Moving Averages ---
-    sma20 = ind.get('sma_20')
-    sma50 = ind.get('sma_50')
     current_price = ind.get('current_price')
-    if sma20 is not None and current_price is not None:
-        vs_sma20 = "au-dessus" if current_price > sma20 else "sous"
-        lines.append(f"SMA20: Prix {vs_sma20} la SMA20 ({sma20:.5f})")
-    if sma50 is not None and current_price is not None:
-        vs_sma50 = "au-dessus" if current_price > sma50 else "sous"
-        lines.append(f"SMA50: Prix {vs_sma50} la SMA50 ({sma50:.5f})")
-
     ema20 = ind.get('ema_20')
     ema200 = ind.get('ema_200')
-    if ema20 is not None:
-        lines.append(f"EMA20: {ema20:.5f}")
+    if ema20 is not None and current_price is not None:
+        vs_ema20 = "au-dessus" if current_price > ema20 else "sous"
+        lines.append(f"EMA20: Prix {vs_ema20} l'EMA20 ({ema20:.5f})")
     if ema200 is not None and current_price is not None:
         vs_ema200 = "au-dessus" if current_price > ema200 else "sous"
         lines.append(f"EMA200: Prix {vs_ema200} l'EMA200 ({ema200:.5f})")
@@ -239,6 +233,21 @@ def _format_indicators_v2(ind: dict) -> str:
         pct_from_high = ((high24 - current_price) / current_price * 100) if current_price else 0
         pct_from_low = ((current_price - low24) / current_price * 100) if current_price else 0
         lines.append(f"Range 24h: {low24:.5f} - {high24:.5f} (prix a {pct_from_low:.1f}% du bas, {pct_from_high:.1f}% du haut)")
+
+    # --- Volume & VWAP ---
+    vol_pct = ind.get('volume_anomaly_pct')
+    if vol_pct is not None:
+        if vol_pct > 200:
+            lines.append(f"Volume: ANOMALIE MAJEURE ({vol_pct:.0f}% de la moyenne) - Forte participation")
+        elif vol_pct > 130:
+            lines.append(f"Volume: Actif ({vol_pct:.0f}% de la moyenne)")
+        else:
+            lines.append(f"Volume: Normal/Faible ({vol_pct:.0f}% de la moyenne)")
+
+    vwap = ind.get('daily_vwap')
+    if vwap is not None and current_price is not None:
+        vs_vwap = "au-dessus" if current_price > vwap else "sous"
+        lines.append(f"VWAP: Prix {vs_vwap} le VWAP Journalier ({vwap:.5f})")
 
     return "\n".join(lines)
 
@@ -313,7 +322,7 @@ def _format_indicators(ind: dict) -> str:
     """Formateur legacy."""
     lines = []
     for key, label in [
-        ("rsi_14", "RSI 14"), ("sma_20", "SMA 20"), ("sma_50", "SMA 50"),
+        ("rsi_14", "RSI 14"), ("ema_20", "EMA 20"), ("ema_200", "EMA 200"),
         ("atr_14", "ATR 14"), ("bb_position_pct", "BB Position"),
     ]:
         if ind.get(key) is not None:

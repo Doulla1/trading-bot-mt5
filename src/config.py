@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # --- Retrocompatibilite (deprecated, migrer vers ai_api_key) ---
     openai_api_key: str = ""
     deepseek_api_key: str = ""
+    # Activer ou non la generation d'images et l'OCR via Vision
+    # DESACTIVE PAR DEFAUT CAR: 
+    # 1. Les Points Pivots mathematiques (S1, S2, R1...) sont plus precis que la lecture visuelle (sans hallucinations).
+    # 2. Gain enorme en vitesse d'execution (2s au lieu de 15s).
+    # 3. Evite les conflits entre l'ADX mathematique et l'estimation visuelle de la tendance par l'IA.
+    use_vision_ocr: bool = False
     mt5_login: int = 0
     mt5_password: str = ""
     mt5_server: str = "FusionMarkets-Demo"

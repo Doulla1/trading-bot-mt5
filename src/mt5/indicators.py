@@ -8,8 +8,8 @@ import numpy as np
 from loguru import logger
 
 
-def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None) -> dict:
-    """Calcule tous les indicateurs a partir d'un DataFrame OHLCV M15 (+ H1 optionnel)."""
+def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None, df_h4: pd.DataFrame | None = None) -> dict:
+    """Calcule tous les indicateurs a partir d'un DataFrame OHLCV M15 (+ H1/H4 optionnels)."""
     if df.empty or len(df) < 50:
         logger.warning("Pas assez de donnees pour les indicateurs (min 50 bougies)")
         return {}
@@ -37,12 +37,32 @@ def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None) -> dict:
     result["di_minus"] = round(di_minus, 1) if not np.isnan(di_minus) else None
 
     # --- Moving Averages ---
-    result["sma_20"] = round(close.iloc[-20:].mean(), 5)
-    result["sma_50"] = round(close.iloc[-50:].mean(), 5) if len(close) >= 50 else None
     ema_20 = close.ewm(span=20, adjust=False).mean()
     result["ema_20"] = round(float(ema_20.iloc[-1]), 5)
     ema_200 = close.ewm(span=200, adjust=False).mean() if len(close) >= 200 else None
     result["ema_200"] = round(float(ema_200.iloc[-1]), 5) if ema_200 is not None and len(ema_200) > 0 else None
+
+    # --- Volume Anomaly ---
+    if "tick_volume" in df.columns:
+        vol = df["tick_volume"].astype(float)
+        vol_sma = vol.rolling(window=20).mean()
+        if vol_sma.iloc[-1] > 0:
+            result["volume_anomaly_pct"] = round((vol.iloc[-1] / vol_sma.iloc[-1]) * 100, 1)
+        else:
+            result["volume_anomaly_pct"] = 100.0
+
+    # --- Daily VWAP ---
+    if "tick_volume" in df.columns:
+        try:
+            typical_price = (high + low + close) / 3
+            vol_price = typical_price * vol
+            daily_cum_vol_price = vol_price.groupby(df.index.date).cumsum()
+            daily_cum_vol = vol.groupby(df.index.date).cumsum()
+            vwap = daily_cum_vol_price / daily_cum_vol
+            result["daily_vwap"] = round(float(vwap.iloc[-1]), 5)
+        except Exception as e:
+            logger.error(f"Erreur VWAP: {e}")
+            result["daily_vwap"] = None
 
     # --- Bollinger Bands ---
     bb_upper, bb_middle, bb_lower = _bollinger_bands(close, 20, 2)
@@ -71,11 +91,11 @@ def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None) -> dict:
     result["low_24h"] = round(low.iloc[-96:].min(), 5) if len(low) >= 96 else round(low.min(), 5)
 
     # --- Tendance ---
-    if result["sma_50"] is not None:
-        result["trend_short"] = "haussier" if last_close > result["sma_20"] else "baissier"
-        result["trend_medium"] = "haussier" if last_close > result["sma_50"] else "baissier"
+    if result["ema_200"] is not None:
+        result["trend_short"] = "haussier" if last_close > result["ema_20"] else "baissier"
+        result["trend_medium"] = "haussier" if last_close > result["ema_200"] else "baissier"
     else:
-        result["trend_short"] = "haussier" if last_close > result["sma_20"] else "baissier"
+        result["trend_short"] = "haussier" if last_close > result["ema_20"] else "baissier"
         result["trend_medium"] = "indetermine"
 
     if result.get("ichimoku_cloud_top") is not None:
@@ -93,12 +113,16 @@ def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None) -> dict:
     # --- Structure de marche v2.0 ---
     result["market_structure"] = _market_structure(high, low, close)
 
-    # --- Multi-timeframe H1 v2.0 ---
+    # --- Multi-timeframe H1 et H4 v3.0 ---
     if df_h1 is not None and not df_h1.empty:
         h1_close = df_h1["close"].astype(float)
-        result["h1_trend"] = _h1_trend(h1_close)
+        result["h1_trend"] = _tf_trend(h1_close)
         result["h1_rsi_14"] = round(_rsi(h1_close, 14), 1)
         result["h1_close"] = round(float(h1_close.iloc[-1]), 5)
+        
+    if df_h4 is not None and not df_h4.empty:
+        h4_close = df_h4["close"].astype(float)
+        result["h4_trend"] = _tf_trend(h4_close)
 
     return result
 
@@ -319,8 +343,8 @@ def _market_structure(high: pd.Series, low: pd.Series, close: pd.Series, lookbac
         return {"structure": "indetermine", "last_swing_high": None, "last_swing_low": None}
 
 
-def _h1_trend(close: pd.Series) -> str:
-    """Tendance simple H1: prix vs EMA 20."""
+def _tf_trend(close: pd.Series) -> str:
+    """Tendance simple sur TF superieur: prix vs EMA 20."""
     ema = close.ewm(span=20, adjust=False).mean()
     if len(ema) < 2:
         return "indetermine"
