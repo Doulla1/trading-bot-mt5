@@ -189,7 +189,18 @@ def run_symbol(cfg: dict) -> None:
     df_m15 = bridge.get_rates(sym, "M15", count=200)
     df_h1 = bridge.get_rates(sym, tf if tf == "H1" else "H1", count=100) if tf != "H1" else None
     df_h4 = bridge.get_rates(sym, "H4", count=50) if tf != "H4" and tf != "H1" else None
-    ind_data = indicators.compute_all(df_m15, df_h1, df_h4)
+    
+    # Recupere le spread en pips
+    symbol_info = bridge.get_symbol_info(sym)
+    spread = None
+    if symbol_info:
+        spread_points = symbol_info.get("spread", 0)
+        if symbol_info.get("digits", 5) in [3, 5]:
+            spread = spread_points / 10.0
+        else:
+            spread = float(spread_points)
+            
+    ind_data = indicators.compute_all(df_m15, df_h1, df_h4, spread=spread)
 
     # Calendrier
     all_events = fetch_events()

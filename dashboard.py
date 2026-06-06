@@ -208,7 +208,10 @@ if not trades_df.empty and selected_trade_idx is not None:
             if analysis.get("calendar_snapshot"):
                 try:
                     cal = json.loads(analysis["calendar_snapshot"])
-                    st.table(cal) if isinstance(cal, list) else st.json(cal)
+                    if isinstance(cal, list):
+                        st.table(cal)
+                    else:
+                        st.json(cal)
                 except:
                     st.code(analysis["calendar_snapshot"])
             else:

@@ -8,7 +8,7 @@ import numpy as np
 from loguru import logger
 
 
-def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None, df_h4: pd.DataFrame | None = None) -> dict:
+def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None, df_h4: pd.DataFrame | None = None, spread: float | None = None) -> dict:
     """Calcule tous les indicateurs a partir d'un DataFrame OHLCV M15 (+ H1/H4 optionnels)."""
     if df.empty or len(df) < 50:
         logger.warning("Pas assez de donnees pour les indicateurs (min 50 bougies)")
@@ -37,10 +37,10 @@ def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None, df_h4: pd.D
     result["di_minus"] = round(di_minus, 1) if not np.isnan(di_minus) else None
 
     # --- Moving Averages ---
-    ema_20 = close.ewm(span=20, adjust=False).mean()
-    result["ema_20"] = round(float(ema_20.iloc[-1]), 5)
-    ema_200 = close.ewm(span=200, adjust=False).mean() if len(close) >= 200 else None
-    result["ema_200"] = round(float(ema_200.iloc[-1]), 5) if ema_200 is not None and len(ema_200) > 0 else None
+    ema_20_series = close.ewm(span=20, adjust=False).mean()
+    result["ema_20"] = round(float(ema_20_series.iloc[-1]), 5)
+    ema_200_series = close.ewm(span=200, adjust=False).mean() if len(close) >= 200 else None
+    result["ema_200"] = round(float(ema_200_series.iloc[-1]), 5) if ema_200_series is not None and len(ema_200_series) > 0 else None
 
     # --- Volume Anomaly ---
     if "tick_volume" in df.columns:
@@ -107,11 +107,69 @@ def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None, df_h4: pd.D
     if result["adx_14"] is not None:
         result["market_regime"] = "trending" if result["adx_14"] >= 25 else "ranging"
 
+    # --- EMA Slopes ---
+    if atr_val and atr_val > 0:
+        # EMA 20 slope over last 3 bars
+        if len(ema_20_series) >= 4:
+            ema_20_diff = ema_20_series.iloc[-1] - ema_20_series.iloc[-4]
+            ema_20_threshold = 0.05 * atr_val
+            if ema_20_diff > ema_20_threshold:
+                result["ema_20_slope"] = "haussiere"
+            elif ema_20_diff < -ema_20_threshold:
+                result["ema_20_slope"] = "baissiere"
+            else:
+                result["ema_20_slope"] = "plate"
+        else:
+            result["ema_20_slope"] = "indeterminee"
+
+        # EMA 200 slope over last 5 bars
+        if ema_200_series is not None and len(ema_200_series) >= 6:
+            ema_200_diff = ema_200_series.iloc[-1] - ema_200_series.iloc[-6]
+            ema_200_threshold = 0.02 * atr_val
+            if ema_200_diff > ema_200_threshold:
+                result["ema_200_slope"] = "haussiere"
+            elif ema_200_diff < -ema_200_threshold:
+                result["ema_200_slope"] = "baissiere"
+            else:
+                result["ema_200_slope"] = "plate"
+        else:
+            result["ema_200_slope"] = "indeterminee"
+    else:
+        result["ema_20_slope"] = "indeterminee"
+        result["ema_200_slope"] = "indeterminee"
+
     # --- Patterns chandeliers v2.0 ---
     result["candlestick_patterns"] = _detect_candlestick_patterns(df)
 
     # --- Structure de marche v2.0 ---
     result["market_structure"] = _market_structure(high, low, close)
+
+    # --- Distances relatives en ATR ---
+    def _calc_dist_atr(val1, val2, atr) -> float | None:
+        if val1 is None or val2 is None or atr is None or atr <= 0:
+            return None
+        return round((val1 - val2) / atr, 2)
+
+    result["dist_ema20_atr"] = _calc_dist_atr(last_close, result["ema_20"], atr_val)
+    result["dist_ema200_atr"] = _calc_dist_atr(last_close, result["ema_200"], atr_val)
+    result["dist_bb_upper_atr"] = _calc_dist_atr(result["bb_upper"], last_close, atr_val)
+    result["dist_bb_lower_atr"] = _calc_dist_atr(last_close, result["bb_lower"], atr_val)
+    result["dist_pivot_support_atr"] = _calc_dist_atr(last_close, result.get("pivot_nearest_support"), atr_val)
+    result["dist_pivot_resistance_atr"] = _calc_dist_atr(result.get("pivot_nearest_resistance"), last_close, atr_val)
+    result["dist_ichimoku_cloud_top_atr"] = _calc_dist_atr(last_close, result.get("ichimoku_cloud_top"), atr_val)
+    result["dist_ichimoku_cloud_bottom_atr"] = _calc_dist_atr(last_close, result.get("ichimoku_cloud_bottom"), atr_val)
+
+    struct = result.get("market_structure", {})
+    last_swing_high = struct.get("last_swing_high") if isinstance(struct, dict) else None
+    last_swing_low = struct.get("last_swing_low") if isinstance(struct, dict) else None
+    result["dist_swing_high_atr"] = _calc_dist_atr(last_swing_high, last_close, atr_val)
+    result["dist_swing_low_atr"] = _calc_dist_atr(last_close, last_swing_low, atr_val)
+
+    # --- Spread et couts de trading ---
+    if spread is not None:
+        result["spread"] = spread
+        if atr_val and atr_val > 0:
+            result["spread_atr_pct"] = round((spread / atr_val) * 100, 1)
 
     # --- Multi-timeframe H1 et H4 v3.0 ---
     if df_h1 is not None and not df_h1.empty:
@@ -123,6 +181,8 @@ def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None, df_h4: pd.D
     if df_h4 is not None and not df_h4.empty:
         h4_close = df_h4["close"].astype(float)
         result["h4_trend"] = _tf_trend(h4_close)
+        result["h4_rsi_14"] = round(_rsi(h4_close, 14), 1)
+        result["h4_close"] = round(float(h4_close.iloc[-1]), 5)
 
     return result
 
@@ -270,40 +330,89 @@ def _pivot_points(high: pd.Series, low: pd.Series, close: pd.Series) -> dict:
         return {}
 
 
-def _detect_candlestick_patterns(df: pd.DataFrame) -> list[str]:
-    """Detecte les patterns chandeliers majeurs."""
+def _detect_candlestick_patterns(df: pd.DataFrame, lookback: int = 3) -> list[str]:
+    """Detecte les patterns chandeliers majeurs sur les 'lookback' dernieres bougies."""
     patterns = []
     try:
         o = df["open"].astype(float)
         h = df["high"].astype(float)
         l = df["low"].astype(float)
         c = df["close"].astype(float)
-        idx = -1
+        
+        # Parcourir les indices de la fin du DataFrame (ex: -1, -2, -3)
+        for idx in range(-1, -1 - lookback, -1):
+            if len(df) < abs(idx) + 2:
+                continue
+                
+            body = abs(c.iloc[idx] - o.iloc[idx])
+            upper_wick = h.iloc[idx] - max(c.iloc[idx], o.iloc[idx])
+            lower_wick = min(c.iloc[idx], o.iloc[idx]) - l.iloc[idx]
+            total_range = h.iloc[idx] - l.iloc[idx]
+            if total_range == 0:
+                continue
 
-        body = abs(c.iloc[idx] - o.iloc[idx])
-        upper_wick = h.iloc[idx] - max(c.iloc[idx], o.iloc[idx])
-        lower_wick = min(c.iloc[idx], o.iloc[idx]) - l.iloc[idx]
-        total_range = h.iloc[idx] - l.iloc[idx]
+            body_pct = (body / total_range) * 100
 
-        body_pct = (body / total_range * 100) if total_range != 0 else 0
+            # 1. Doji
+            if body_pct < 10:
+                patterns.append("doji")
+                
+            # 2. Hammer / Hanging Man (Pinbar bas)
+            if lower_wick > 2 * body and upper_wick < 0.5 * body and body_pct > 10:
+                patterns.append("hammer" if c.iloc[idx] > o.iloc[idx] else "hanging_man")
+                
+            # 3. Shooting Star / Inverted Hammer (Pinbar haut)
+            if upper_wick > 2 * body and lower_wick < 0.5 * body and body_pct > 10:
+                patterns.append("shooting_star" if c.iloc[idx] < o.iloc[idx] else "inverted_hammer")
+                
+            # 4. Marubozu
+            if body_pct > 90:
+                patterns.append("bullish_marubozu" if c.iloc[idx] > o.iloc[idx] else "bearish_marubozu")
 
-        if body_pct < 10:
-            patterns.append("doji")
-        if lower_wick > 2 * body and upper_wick < body and body_pct > 10:
-            patterns.append("hammer" if c.iloc[idx] > o.iloc[idx] else "hanging_man")
-        if upper_wick > 2 * body and lower_wick < body and body_pct > 10:
-            patterns.append("shooting_star" if c.iloc[idx] < o.iloc[idx] else "inverted_hammer")
-
-        if len(o) >= 2:
-            prev_body = abs(c.iloc[-2] - o.iloc[-2])
-            if body > prev_body * 1.5:
-                if c.iloc[idx] > o.iloc[idx] and c.iloc[-2] < o.iloc[-2]:
+            # Patterns necessitant 2 bougies (idx et idx-1)
+            prev_body = abs(c.iloc[idx-1] - o.iloc[idx-1])
+            
+            # Engulfing
+            if c.iloc[idx] > o.iloc[idx] and c.iloc[idx-1] < o.iloc[idx-1]:
+                if c.iloc[idx] >= o.iloc[idx-1] and o.iloc[idx] <= c.iloc[idx-1]:
                     patterns.append("bullish_engulfing")
-                elif c.iloc[idx] < o.iloc[idx] and c.iloc[-2] > o.iloc[-2]:
+            elif c.iloc[idx] < o.iloc[idx] and c.iloc[idx-1] > o.iloc[idx-1]:
+                if o.iloc[idx] >= c.iloc[idx-1] and c.iloc[idx] <= o.iloc[idx-1]:
                     patterns.append("bearish_engulfing")
-    except Exception:
-        pass
-    return patterns if patterns else ["aucun_pattern"]
+                    
+            # Inside Bar
+            if h.iloc[idx] < h.iloc[idx-1] and l.iloc[idx] > l.iloc[idx-1]:
+                patterns.append("inside_bar")
+                
+            # Outside Bar
+            if h.iloc[idx] > h.iloc[idx-1] and l.iloc[idx] < l.iloc[idx-1]:
+                patterns.append("outside_bar")
+
+            # Patterns necessitant 3 bougies (idx, idx-1, idx-2)
+            if len(df) >= abs(idx) + 3:
+                # Morning Star
+                if (c.iloc[idx-2] < o.iloc[idx-2] and 
+                    abs(c.iloc[idx-1] - o.iloc[idx-1]) < abs(c.iloc[idx-2] - o.iloc[idx-2]) * 0.4 and 
+                    c.iloc[idx] > o.iloc[idx] and 
+                    c.iloc[idx] > (o.iloc[idx-2] + c.iloc[idx-2]) / 2):
+                    patterns.append("morning_star")
+                # Evening Star
+                elif (c.iloc[idx-2] > o.iloc[idx-2] and 
+                      abs(c.iloc[idx-1] - o.iloc[idx-1]) < abs(c.iloc[idx-2] - o.iloc[idx-2]) * 0.4 and 
+                      c.iloc[idx] < o.iloc[idx] and 
+                      c.iloc[idx] < (o.iloc[idx-2] + c.iloc[idx-2]) / 2):
+                    patterns.append("evening_star")
+
+    except Exception as e:
+        logger.error(f"Erreur detection patterns: {e}")
+        
+    # Retirer les doublons tout en gardant l'ordre
+    unique_patterns = []
+    for p in patterns:
+        if p not in unique_patterns:
+            unique_patterns.append(p)
+            
+    return unique_patterns if unique_patterns else ["aucun_pattern"]
 
 
 def _market_structure(high: pd.Series, low: pd.Series, close: pd.Series, lookback: int = 20) -> dict:

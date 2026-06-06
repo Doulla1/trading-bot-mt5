@@ -101,7 +101,7 @@ def _init_tables(db: sqlite3.Connection) -> None:
 
 def log_analysis(symbol, timeframe, decision, screenshot_path, indicators, calendar_events, was_executed) -> int:
     """Enregistre une analyse IA. Retourne l'ID."""
-    db = get_db()
+    db = get_db(symbol=symbol)
     cursor = db.execute(
         """INSERT INTO analysis_logs (timestamp, symbol, timeframe, decision_action, decision_confidence, decision_reasoning, screenshot_path, indicators_snapshot, calendar_snapshot, was_executed)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -138,7 +138,7 @@ def log_trade_close(ticket, close_price, profit, reason: str = "EXPERT", symbol:
 
 def get_recent_trades(limit=20, symbol: str | None = None) -> list:
     """Retourne les derniers trades, filtres par symbole si fourni (BUG-get_recent_trades)."""
-    db = get_db()
+    db = get_db(symbol=symbol)
     if symbol:
         rows = db.execute(
             "SELECT * FROM trades WHERE symbol = ? ORDER BY opened_at DESC LIMIT ?",
@@ -151,7 +151,7 @@ def get_recent_trades(limit=20, symbol: str | None = None) -> list:
 
 def get_statistics(symbol: str | None = None) -> dict:
     """Calcule les statistiques de trading, filtrees par symbole si fourni (INC-B fix)."""
-    db = get_db()
+    db = get_db(symbol=symbol)
     stats = {}
     # Filtrer par symbole pour eviter de melanger les stats multi-paires
     sym_filter = "AND symbol = ?" if symbol else ""

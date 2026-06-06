@@ -161,7 +161,19 @@ def run_once() -> None:
         # 2. Indicateurs multi-TF v2.0
         df_m15 = bridge.get_rates(sym, "M15", count=200)
         df_h1 = bridge.get_rates(sym, "H1", count=100)
-        indicators_data = indicators.compute_all(df_m15, df_h1)
+        df_h4 = bridge.get_rates(sym, "H4", count=50)
+        
+        # Recupere le spread en pips
+        symbol_info = bridge.get_symbol_info(sym)
+        spread = None
+        if symbol_info:
+            spread_points = symbol_info.get("spread", 0)
+            if symbol_info.get("digits", 5) in [3, 5]:
+                spread = spread_points / 10.0
+            else:
+                spread = float(spread_points)
+                
+        indicators_data = indicators.compute_all(df_m15, df_h1, df_h4, spread=spread)
 
         # 3. Screenshot (debug) + Chart genere pour OCR v2.1
         screenshot_path = screenshots.capture_chart(sym)

@@ -93,9 +93,13 @@ def build_decision_prompt(symbol, timeframe, indicators, ocr_data,
     structure = indicators.get("market_structure", {})
     parts.append(f"Structure marche: {structure.get('structure', 'indetermine')}")
     if structure.get("last_swing_high"):
-        parts.append(f"  Dernier swing high: {structure['last_swing_high']}")
+        dist_sh = indicators.get("dist_swing_high_atr")
+        dist_sh_str = f" (Distance: +{dist_sh} ATR)" if dist_sh is not None else ""
+        parts.append(f"  Dernier swing high: {structure['last_swing_high']}{dist_sh_str}")
     if structure.get("last_swing_low"):
-        parts.append(f"  Dernier swing low: {structure['last_swing_low']}")
+        dist_sl = indicators.get("dist_swing_low_atr")
+        dist_sl_str = f" (Distance: +{dist_sl} ATR)" if dist_sl is not None else ""
+        parts.append(f"  Dernier swing low: {structure['last_swing_low']}{dist_sl_str}")
 
     # 6. MULTI-TIMEFRAME
     if indicators.get("h1_trend") is not None or indicators.get("h4_trend") is not None:
@@ -104,7 +108,9 @@ def build_decision_prompt(symbol, timeframe, indicators, ocr_data,
             parts.append(f"H1 Tendance: {indicators['h1_trend']}")
         if indicators.get("h4_trend"):
             parts.append(f"H4 Tendance: {indicators['h4_trend']}")
-        parts.append(f"H1 RSI: {indicators.get('h1_rsi_14', 'N/A')}")
+        parts.append(f"H1 RSI: {indicators.get('h1_rsi_14', 'N/A')} | H1 Close: {indicators.get('h1_close', 'N/A')}")
+        if indicators.get("h4_trend"):
+            parts.append(f"H4 RSI: {indicators.get('h4_rsi_14', 'N/A')} | H4 Close: {indicators.get('h4_close', 'N/A')}")
 
     # 7. REGIME DE MARCHE
     parts.append(f"--- REGIME ---")
@@ -227,18 +233,46 @@ def _format_indicators_v2(ind: dict) -> str:
             bb_state = f"Prix dans la MOITIE INFERIEURE des bandes (pression baissiere)"
         else:
             bb_state = f"Prix SUR LA BANDE INFERIEURE (surf baissier, possible cassure)"
-        lines.append(f"Bollinger: {bb_state}")
+        
+        # Distances relatives en ATR
+        dist_upper = ind.get('dist_bb_upper_atr')
+        dist_lower = ind.get('dist_bb_lower_atr')
+        dist_str = []
+        if dist_upper is not None:
+            dist_str.append(f"dist Haut: {dist_upper} ATR")
+        if dist_lower is not None:
+            dist_str.append(f"dist Bas: {dist_lower} ATR")
+        bb_dist_info = f" ({', '.join(dist_str)})" if dist_str else ""
+        lines.append(f"Bollinger: {bb_state}{bb_dist_info}")
 
     # --- Moving Averages ---
     current_price = ind.get('current_price')
     ema20 = ind.get('ema_20')
     ema200 = ind.get('ema_200')
+    ema20_slope = ind.get('ema_20_slope')
+    ema200_slope = ind.get('ema_200_slope')
+    dist_ema20 = ind.get('dist_ema20_atr')
+    dist_ema200 = ind.get('dist_ema200_atr')
+    
     if ema20 is not None and current_price is not None:
         vs_ema20 = "au-dessus" if current_price > ema20 else "sous"
-        lines.append(f"EMA20: Prix {vs_ema20} l'EMA20 ({ema20:.5f})")
+        ema20_str = f"EMA20: Prix {vs_ema20} l'EMA20 ({ema20:.5f})"
+        if dist_ema20 is not None:
+            sign = "+" if dist_ema20 >= 0 else ""
+            ema20_str += f" | Dist: {sign}{dist_ema20} ATR"
+        if ema20_slope:
+            ema20_str += f" | Pente: {ema20_slope}"
+        lines.append(ema20_str)
+        
     if ema200 is not None and current_price is not None:
         vs_ema200 = "au-dessus" if current_price > ema200 else "sous"
-        lines.append(f"EMA200: Prix {vs_ema200} l'EMA200 ({ema200:.5f})")
+        ema200_str = f"EMA200: Prix {vs_ema200} l'EMA200 ({ema200:.5f})"
+        if dist_ema200 is not None:
+            sign = "+" if dist_ema200 >= 0 else ""
+            ema200_str += f" | Dist: {sign}{dist_ema200} ATR"
+        if ema200_slope:
+            ema200_str += f" | Pente: {ema200_slope}"
+        lines.append(ema200_str)
 
     # --- ATR: volatilite ---
     atr = ind.get('atr_14')
@@ -265,6 +299,15 @@ def _format_indicators_v2(ind: dict) -> str:
         pct_from_low = ((current_price - low24) / current_price * 100) if current_price else 0
         lines.append(f"Range 24h: {low24:.5f} - {high24:.5f} (prix a {pct_from_low:.1f}% du bas, {pct_from_high:.1f}% du haut)")
 
+    # --- Spread ---
+    spread = ind.get('spread')
+    spread_atr = ind.get('spread_atr_pct')
+    if spread is not None:
+        spread_str = f"Spread: {spread:.1f} pips"
+        if spread_atr is not None:
+            spread_str += f" ({spread_atr}% de l'ATR 14)"
+        lines.append(spread_str)
+
     # --- Volume & VWAP ---
     vol_pct = ind.get('volume_anomaly_pct')
     if vol_pct is not None:
@@ -284,10 +327,18 @@ def _format_indicators_v2(ind: dict) -> str:
 
 
 def _format_ichimoku(ind: dict) -> str:
+    dist_top = ind.get('dist_ichimoku_cloud_top_atr')
+    dist_bottom = ind.get('dist_ichimoku_cloud_bottom_atr')
+    cloud_str = f"Cloud Top: {ind.get('ichimoku_cloud_top', '?')}, Bottom: {ind.get('ichimoku_cloud_bottom', '?')}"
+    if dist_top is not None and dist_bottom is not None:
+        sign_top = "+" if dist_top >= 0 else ""
+        sign_bottom = "+" if dist_bottom >= 0 else ""
+        cloud_str += f" | Distances: Top={sign_top}{dist_top} ATR, Bottom={sign_bottom}{dist_bottom} ATR"
+        
     lines = [
         f"Tenkan: {ind.get('ichimoku_tenkan', '?')}",
         f"Kijun: {ind.get('ichimoku_kijun', '?')}",
-        f"Cloud Top: {ind.get('ichimoku_cloud_top', '?')}, Bottom: {ind.get('ichimoku_cloud_bottom', '?')}",
+        cloud_str,
         f"Cloud Couleur: {ind.get('ichimoku_cloud_color', '?')}",
         f"Prix vs Cloud: {ind.get('ichimoku_price_vs_cloud', '?')}",
         f"Tenkan/Kijun Cross: {ind.get('ichimoku_tenkan_kijun_cross', '?')}",
@@ -297,12 +348,23 @@ def _format_ichimoku(ind: dict) -> str:
 
 
 def _format_pivots(ind: dict) -> str:
+    dist_support = ind.get('dist_pivot_support_atr')
+    dist_resistance = ind.get('dist_pivot_resistance_atr')
+    
+    support_str = f"Support le plus proche: {ind.get('pivot_nearest_support', '?')}"
+    if dist_support is not None:
+        support_str += f" | Dist: +{dist_support} ATR"
+        
+    resistance_str = f"Resistance la plus proche: {ind.get('pivot_nearest_resistance', '?')}"
+    if dist_resistance is not None:
+        resistance_str += f" | Dist: +{dist_resistance} ATR"
+        
     lines = [
         f"PP: {ind.get('pivot_pp', '?')}",
         f"R1: {ind.get('pivot_r1', '?')}, R2: {ind.get('pivot_r2', '?')}, R3: {ind.get('pivot_r3', '?')}",
         f"S1: {ind.get('pivot_s1', '?')}, S2: {ind.get('pivot_s2', '?')}, S3: {ind.get('pivot_s3', '?')}",
-        f"Support le plus proche: {ind.get('pivot_nearest_support', '?')}",
-        f"Resistance la plus proche: {ind.get('pivot_nearest_resistance', '?')}",
+        support_str,
+        resistance_str,
     ]
     return "\n".join(lines)
 
