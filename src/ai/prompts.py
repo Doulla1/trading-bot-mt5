@@ -1,25 +1,47 @@
-"""Templates de prompts pour l'IA.
+"""Templates of prompts for the AI.
 
-v2.0: prompts separes OCR (GPT-4o-mini) et Decision (DeepSeek V4 Pro)."""
+v2.0: separate prompts for OCR (GPT-4o-mini) and Decision (DeepSeek V4 Pro)."""
 
-# Configuration des limites de Stop Loss (SL) par symbole (en pips) pour l'affichage dans le prompt.
-# Permet a l'IA de proposer des valeurs de SL/TP realistes et adaptees a chaque classe d'actif.
+# Configuration of Stop Loss (SL) limits by symbol (in pips) for display in the prompt.
+# Allows the AI to propose realistic SL/TP values adapted to each asset class.
 SL_LIMITS_CONFIG = {
-    "XAUUSD": {"min": 150, "max": 500, "note": "(1 pip = 0.1 USD de variation de prix, ex: 150 pips = 15.0 USD)"},
-    "EURUSD": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 de variation de prix)"},
-    "GBPUSD": {"min": 25,  "max": 70,  "note": "(1 pip = 0.0001 de variation de prix)"},
-    "AUDUSD": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 de variation de prix)"},
-    "USDJPY": {"min": 30,  "max": 90,  "note": "(1 pip = 0.01 de variation de prix)"},
-    "USDCHF": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 de variation de prix)"},
-    "EURGBP": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 de variation de prix)"},
-    "EURJPY": {"min": 25,  "max": 80,  "note": "(1 pip = 0.01 de variation de prix)"},
-    "GBPJPY": {"min": 35,  "max": 100, "note": "(1 pip = 0.01 de variation de prix)"},
+    "XAUUSD": {"min": 150, "max": 500, "note": "(1 pip = 0.1 USD price change, e.g., 150 pips = 15.0 USD)"},
+    "EURUSD": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 price change)"},
+    "GBPUSD": {"min": 25,  "max": 70,  "note": "(1 pip = 0.0001 price change)"},
+    "AUDUSD": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 price change)"},
+    "USDJPY": {"min": 30,  "max": 90,  "note": "(1 pip = 0.01 price change)"},
+    "USDCHF": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 price change)"},
+    "EURGBP": {"min": 15,  "max": 50,  "note": "(1 pip = 0.0001 price change)"},
+    "EURJPY": {"min": 25,  "max": 80,  "note": "(1 pip = 0.01 price change)"},
+    "GBPJPY": {"min": 35,  "max": 100, "note": "(1 pip = 0.01 price change)"},
 }
+
+
+def _translate_trend(val: str) -> str:
+    if not val or not isinstance(val, str):
+        return val
+    mapping = {
+        "haussier": "bullish",
+        "baissier": "bearish",
+        "haussiere": "bullish",
+        "baissiere": "bearish",
+        "plate": "flat",
+        "neutre": "neutral",
+        "indetermine": "undetermined",
+        "indeterminee": "undetermined",
+        "au-dessus": "above",
+        "dessous": "below",
+        "dedans": "inside",
+        "aucun": "none",
+        "vert": "green",
+        "rouge": "red"
+    }
+    return mapping.get(val.lower(), val)
 
 
 def build_analysis_prompt(symbol, timeframe, indicators, calendar_events,
                           open_positions, account_info) -> str:
-    """Prompt legacy pour GPT-4o-mini (fallback)."""
+    """Legacy prompt for GPT-4o-mini (fallback)."""
     ind_text = _format_indicators(indicators)
     cal_text = _format_calendar(calendar_events)
     pos_text = _format_positions(open_positions, account_info)
@@ -29,46 +51,47 @@ def build_analysis_prompt(symbol, timeframe, indicators, calendar_events,
     max_sl = sl_cfg["max"]
     note_sl = sl_cfg["note"]
 
-    return f"""Tu es un analyste de trading forex expert. Analyse le graphique fourni en capture d'ecran et les donnees ci-dessous pour prendre une decision de trading.
+    return f"""You are an expert forex trading analyst. Analyze the provided chart screenshot and the data below to make a trading decision.
 
-**INFORMATIONS DE TRADING**
-- Paire: {symbol}
+**TRADING INFORMATION**
+- Symbol: {symbol}
 - Timeframe: {timeframe}
-- Prix actuel: {indicators.get('current_price', 'N/A')}
+- Current Price: {indicators.get('current_price', 'N/A')}
 
-**INDICATEURS TECHNIQUES**
+**TECHNICAL INDICATORS**
 {ind_text}
 
-**CALENDRIER ECONOMIQUE (prochaines 24h)**
+**ECONOMIC CALENDAR (Next 24h)**
 {cal_text}
 
-**POSITIONS OUVERTES**
+**OPEN POSITIONS**
 {pos_text}
 
-**INSTRUCTIONS D'ANALYSE**
-Analyse le graphique et les indicateurs. Considere les evenements economiques.
-Si une position est deja ouverte, evalue s'il faut la conserver ou la fermer.
+**ANALYSIS INSTRUCTIONS**
+Analyze the chart and indicators. Consider economic events.
+If a position is already open, evaluate whether to hold or close it.
 
-Reponds UNIQUEMENT avec un objet JSON:
+Respond ONLY with a JSON object:
 {{"action": "BUY|SELL|HOLD|CLOSE", "confidence": 0-100, "reasoning": "...", "stop_loss_pips": int, "take_profit_pips": int, "risk_level": "LOW|MEDIUM|HIGH"}}
-- stop_loss_pips entre {min_sl} et {max_sl} pips {note_sl}, take_profit_pips >= stop_loss_pips * 1.5"""
+- stop_loss_pips must be between {min_sl} and {max_sl} pips {note_sl}, take_profit_pips >= stop_loss_pips * 1.5
+- Write the 'reasoning' field entirely in French."""
 
 
 def build_decision_prompt(symbol, timeframe, indicators, ocr_data,
                           calendar_events, open_positions, account_info,
                           trade_history, session_context,
                           performance_stats=None) -> str:
-    """Prompt complet pour DeepSeek V4 Pro avec tout le contexte (v2.0)."""
+    """Full prompt for DeepSeek V4 Pro with all context (v2.0)."""
 
-    parts = [f"""Tu es un trader institutionnel forex expert. Analyse TOUTES les donnees ci-dessous et prends une decision de trading.
+    parts = [f"""You are an expert institutional forex trader. Analyze ALL the data below and make a trading decision.
 
-**PAIRE**: {symbol} | **TIMEFRAME**: {timeframe}
-**PRIX ACTUEL**: {indicators.get('current_price', 'N/A')}
-**DATE/HEURE**: {session_context.get('datetime', 'N/A')}
+**SYMBOL**: {symbol} | **TIMEFRAME**: {timeframe}
+**CURRENT PRICE**: {indicators.get('current_price', 'N/A')}
+**DATE/TIME**: {session_context.get('datetime', 'N/A')}
 **SESSION**: {session_context.get('session', 'N/A')}"""]
 
-    # 1. INDICATEURS TECHNIQUES
-    parts.append("--- INDICATEURS TECHNIQUES ---")
+    # 1. TECHNICAL INDICATORS
+    parts.append("--- TECHNICAL INDICATORS ---")
     parts.append(_format_indicators_v2(indicators))
 
     # 2. ICHIMOKU
@@ -78,60 +101,60 @@ def build_decision_prompt(symbol, timeframe, indicators, ocr_data,
 
     # 3. PIVOT POINTS
     if indicators.get("pivot_pp") is not None:
-        parts.append("--- POINTS PIVOTS ---")
+        parts.append("--- PIVOT POINTS ---")
         parts.append(_format_pivots(indicators))
 
-    # 4. OCR (analyse visuelle du chart)
+    # 4. OCR (visual analysis of the chart)
     if ocr_data:
-        parts.append("--- ANALYSE VISUELLE DU CHART (OCR) ---")
+        parts.append("--- CHART VISUAL ANALYSIS (OCR) ---")
         parts.append(_format_ocr(ocr_data))
 
-    # 5. PATTERNS CHANDELIERS + STRUCTURE
-    parts.append("--- PATTERNS ET STRUCTURE ---")
+    # 5. CANDLESTICK PATTERNS + STRUCTURE
+    parts.append("--- PATTERNS AND STRUCTURE ---")
     patterns = indicators.get("candlestick_patterns", [])
-    parts.append(f"Patterns chandeliers: {', '.join(patterns)}")
+    parts.append(f"Candlestick patterns: {', '.join(patterns)}")
     structure = indicators.get("market_structure", {})
-    parts.append(f"Structure marche: {structure.get('structure', 'indetermine')}")
+    parts.append(f"Market structure: {_translate_trend(structure.get('structure', 'undetermined'))}")
     if structure.get("last_swing_high"):
         dist_sh = indicators.get("dist_swing_high_atr")
         dist_sh_str = f" (Distance: +{dist_sh} ATR)" if dist_sh is not None else ""
-        parts.append(f"  Dernier swing high: {structure['last_swing_high']}{dist_sh_str}")
+        parts.append(f"  Last swing high: {structure['last_swing_high']}{dist_sh_str}")
     if structure.get("last_swing_low"):
         dist_sl = indicators.get("dist_swing_low_atr")
         dist_sl_str = f" (Distance: +{dist_sl} ATR)" if dist_sl is not None else ""
-        parts.append(f"  Dernier swing low: {structure['last_swing_low']}{dist_sl_str}")
+        parts.append(f"  Last swing low: {structure['last_swing_low']}{dist_sl_str}")
 
     # 6. MULTI-TIMEFRAME
     if indicators.get("h1_trend") is not None or indicators.get("h4_trend") is not None:
-        parts.append("--- CONTEXTE MULTI-TIMEFRAME ---")
+        parts.append("--- MULTI-TIMEFRAME CONTEXT ---")
         if indicators.get("h1_trend"):
-            parts.append(f"H1 Tendance: {indicators['h1_trend']}")
+            parts.append(f"H1 Trend: {_translate_trend(indicators['h1_trend'])}")
         if indicators.get("h4_trend"):
-            parts.append(f"H4 Tendance: {indicators['h4_trend']}")
+            parts.append(f"H4 Trend: {_translate_trend(indicators['h4_trend'])}")
         parts.append(f"H1 RSI: {indicators.get('h1_rsi_14', 'N/A')} | H1 Close: {indicators.get('h1_close', 'N/A')}")
         if indicators.get("h4_trend"):
             parts.append(f"H4 RSI: {indicators.get('h4_rsi_14', 'N/A')} | H4 Close: {indicators.get('h4_close', 'N/A')}")
 
-    # 7. REGIME DE MARCHE
+    # 7. MARKET REGIME
     parts.append(f"--- REGIME ---")
     parts.append(f"ADX: {indicators.get('adx_14', 'N/A')} "
                  f"(DI+={indicators.get('di_plus', '?')}, DI-={indicators.get('di_minus', '?')})")
-    parts.append(f"Regime: {indicators.get('market_regime', 'N/A')}")
+    parts.append(f"Regime: {_translate_trend(indicators.get('market_regime', 'N/A'))}")
 
-    # 8. CALENDRIER
-    parts.append("--- CALENDRIER ECONOMIQUE ---")
+    # 8. CALENDAR
+    parts.append("--- ECONOMIC CALENDAR ---")
     parts.append(_format_calendar(calendar_events))
 
-    # 9. POSITIONS + COMPTE
-    parts.append("--- POSITIONS OUVERTES ---")
+    # 9. POSITIONS + ACCOUNT
+    parts.append("--- OPEN POSITIONS ---")
     parts.append(_format_positions(open_positions, account_info))
 
-    # 10. HISTORIQUE TRADES
+    # 10. TRADE HISTORY
     if trade_history:
-        parts.append("--- HISTORIQUE RECENT (derniers trades) ---")
+        parts.append("--- RECENT HISTORY (last trades) ---")
         parts.append(_format_trade_history(trade_history))
         if performance_stats:
-            parts.append("--- STATISTIQUES DE PERFORMANCE ---")
+            parts.append("--- PERFORMANCE STATISTICS ---")
             parts.append(_format_performance(performance_stats))
 
     # 11. INSTRUCTIONS
@@ -141,107 +164,108 @@ def build_decision_prompt(symbol, timeframe, indicators, ocr_data,
     note_sl = sl_cfg["note"]
 
     parts.append(f"""--- DECISION ---
-Analyse TOUTES les donnees (technique, Ichimoku, pivots, volume, structure, multi-timeframe, regime de marche, calendrier, historique).
+Analyze ALL data (technical, Ichimoku, pivots, volume, structure, multi-timeframe, market regime, calendar, history).
 
-Regles generales:
-- CONFIDENCE elevee (>70) uniquement si TOUS les signaux convergent.
-- Si une news HIGH impact approche (<30 min) -> HOLD systematique.
-- Si Ichimoku, pivots et structure sont en conflit -> HOLD.
-- Si ADX < 20 (ranging) -> eviter de trader, preference HOLD.
-- Eviter d'ouvrir une position juste avant une news HIGH (le bot bloque deja, mais sois prudent).
+General rules:
+- High CONFIDENCE (>70) only if ALL signals converge.
+- If a HIGH impact news event is approaching (<30 min) -> systematic HOLD.
+- If Ichimoku, pivots, and structure are in conflict -> HOLD.
+- If ADX < 20 (ranging) -> avoid trading, preference HOLD.
+- Avoid opening a position just before HIGH impact news (the bot already blocks it, but be careful).
 
-REGLES DE PLACEMENT DU STOP LOSS (SL) ET TAKE PROFIT (TP) :
-- Le Stop Loss (SL) DOIT etre place de maniere technique et realiste sous forme de distance en pips :
-  * Pour {symbol}, le SL doit etre compris entre {min_sl} et {max_sl} pips {note_sl} selon la volatilite (ATR).
-  * BUY : Place le SL juste sous le dernier swing low (support de structure) ou sous le bas du nuage Ichimoku (support dynamique).
-  * SELL : Place le SL juste au-dessus du dernier swing high (resistance de structure) ou au-dessus du haut du nuage Ichimoku (resistance dynamique).
-- Le Take Profit (TP) DOIT respecter un ratio minimal et etre place de maniere realiste (securisation des gains) :
-  * Le TP doit etre au moins superieur a 1.5x le Stop Loss (TP >= 1.5 * SL).
-  * SECURISATION DES GAINS : Place le TP de maniere intelligente par rapport aux obstacles graphiques. Pour un BUY, place-le 1 a 2 pips SOUS le dernier swing high (ou sous la resistance Pivot R1/R2/R3 ou sous le High 24h) pour garantir son execution avant un rejet. Pour un SELL, place-le 1 a 2 pips AU-DESSUS du dernier swing low (ou du support Pivot S1/S2/S3 ou du Low 24h).
+RULES FOR PLACING STOP LOSS (SL) AND TAKE PROFIT (TP):
+- The Stop Loss (SL) MUST be placed technically and realistically as a distance in pips:
+  * For {symbol}, the SL must be between {min_sl} and {max_sl} pips {note_sl} according to volatility (ATR).
+  * BUY: Place the SL just below the last swing low (structural support) or below the bottom of the Ichimoku cloud (dynamic support).
+  * SELL: Place the SL just above the last swing high (structural resistance) or above the top of the Ichimoku cloud (dynamic resistance).
+- The Take Profit (TP) MUST respect a minimum ratio and be placed realistically (securing gains):
+  * The TP must be at least greater than 1.5x the Stop Loss (TP >= 1.5 * SL).
+  * SECURING GAINS: Place the TP intelligently relative to chart obstacles. For a BUY, place it 1 to 2 pips BELOW the last swing high (or below the Pivot R1/R2/R3 resistance or below the 24h High) to guarantee execution before a rejection. For a SELL, place it 1 to 2 pips ABOVE the last swing low (or above Pivot S1/S2/S3 support or above the 24h Low).
 
-POSITIONS EXISTANTES (regle conservative):
-- Si tu as deja une position et que les signaux confirment ta direction -> HOLD (la position est bonne, le trailing/breakeven s'en occupe)
-- Si tu as deja une position et que les signaux s'inversent clairement (retournement de tendance) -> CLOSE (le bot fermera et attendra le prochain cycle pour reevaluer)
-- Si tu as deja une position et que les signaux sont mixtes -> HOLD (attendre confirmation)
-- NE SUGGERE PAS BUY/SELL si une position est deja ouverte (le bot n'ouvrira pas de deuxieme position)
+EXISTING POSITIONS (conservative rule):
+- If you already have a position and signals confirm your direction -> HOLD (the position is good, trailing/breakeven will handle it).
+- If you already have a position and signals clearly reverse (trend reversal) -> CLOSE (the bot will close and wait for the next cycle to re-evaluate).
+- If you already have a position and signals are mixed -> HOLD (wait for confirmation).
+- DO NOT suggest BUY/SELL if a position is already open (the bot will not open a second position).
 
-Reponds UNIQUEMENT en JSON:
-{{"action": "BUY|SELL|HOLD|CLOSE", "confidence": 0-100, "reasoning": "analyse concise (max 200 mots)", "stop_loss_pips": int, "take_profit_pips": int, "risk_level": "LOW|MEDIUM|HIGH"}}""")
+Respond ONLY in JSON format:
+{{"action": "BUY|SELL|HOLD|CLOSE", "confidence": 0-100, "reasoning": "analyse concise en français (max 200 mots)", "stop_loss_pips": int, "take_profit_pips": int, "risk_level": "LOW|MEDIUM|HIGH"}}
+Ensure the 'reasoning' field is written entirely in French.""")
 
     return "\n".join(parts)
 
 
 # ============================================================
-# Formatteurs enrichis v2.0
+# Enriched Formatters v2.0
 # ============================================================
 
 def _format_indicators_v2(ind: dict) -> str:
-    """Formateur v3.0: envoie des etats semantiques au lieu de valeurs brutes.
-    Les LLMs sont des moteurs de logique semantique, pas des calculateurs mathematiques."""
+    """Formatter v3.0: sends semantic states instead of raw values.
+    LLMs are semantic logic engines, not mathematical calculators."""
     lines = []
 
-    # --- RSI: etat semantique ---
+    # --- RSI: semantic state ---
     rsi = ind.get('rsi_14')
     if rsi is not None:
         if rsi > 75:
-            rsi_state = f"RSI 14: {rsi:.1f} - Zone de SURACHAT (pression acheteuse extreme)"
+            rsi_state = f"RSI 14: {rsi:.1f} - OVERBOUGHT zone (extreme buying pressure)"
         elif rsi > 60:
-            rsi_state = f"RSI 14: {rsi:.1f} - Tendance haussiere (momentum positif)"
+            rsi_state = f"RSI 14: {rsi:.1f} - Bullish trend (positive momentum)"
         elif rsi > 40:
-            rsi_state = f"RSI 14: {rsi:.1f} - Zone neutre (pas d'extreme)"
+            rsi_state = f"RSI 14: {rsi:.1f} - Neutral zone (no extreme)"
         elif rsi > 25:
-            rsi_state = f"RSI 14: {rsi:.1f} - Tendance baissiere (momentum negatif)"
+            rsi_state = f"RSI 14: {rsi:.1f} - Bearish trend (negative momentum)"
         else:
-            rsi_state = f"RSI 14: {rsi:.1f} - Zone de SURVENTE (pression vendeuse extreme)"
+            rsi_state = f"RSI 14: {rsi:.1f} - OVERSOLD zone (extreme selling pressure)"
         lines.append(rsi_state)
 
-    # --- MACD: croisement et zone ---
+    # --- MACD: crossover and zone ---
     macd_line = ind.get('macd_line')
     macd_signal = ind.get('macd_signal')
     macd_hist = ind.get('macd_histogram')
     if macd_line is not None and macd_signal is not None:
         # Relation MACD vs Signal
         if macd_line > macd_signal:
-            cross_state = "MACD au-dessus du Signal (momentum haussier)"
+            cross_state = "MACD above Signal (bullish momentum)"
         else:
-            cross_state = "MACD sous le Signal (momentum baissier)"
-        # Zone (positif/negatif)
+            cross_state = "MACD below Signal (bearish momentum)"
+        # Zone (positive/negative)
         if macd_line > 0:
-            zone = "zone positive"
+            zone = "positive zone"
         else:
-            zone = "zone negative"
-        # Histogramme: acceleration ou deceleration
+            zone = "negative zone"
+        # Histogram: acceleration or deceleration
         if macd_hist is not None:
             if macd_hist > 0:
-                hist_state = "histogramme haussier (acceleration acheteuse)"
+                hist_state = "bullish histogram (buying acceleration)"
             else:
-                hist_state = "histogramme baissier (acceleration vendeuse)"
+                hist_state = "bearish histogram (selling acceleration)"
         else:
             hist_state = ""
-        lines.append(f"MACD: {cross_state} en {zone}, {hist_state}")
+        lines.append(f"MACD: {cross_state} in {zone}, {hist_state}")
 
-    # --- Bollinger Bands: position semantique ---
+    # --- Bollinger Bands: semantic position ---
     bb_pos = ind.get('bb_position_pct')
     if bb_pos is not None:
         if bb_pos > 95:
-            bb_state = f"Prix SUR LA BANDE SUPERIEURE (surf haussier, possible cassure)"
+            bb_state = f"Price ON UPPER BAND (bullish ride, possible breakout)"
         elif bb_pos > 70:
-            bb_state = f"Prix dans la MOITIE SUPERIEURE des bandes (pression haussiere)"
+            bb_state = f"Price in UPPER HALF of bands (bullish pressure)"
         elif bb_pos > 30:
-            bb_state = f"Prix dans la ZONE MEDIANE des bandes (range)"
+            bb_state = f"Price in MIDDLE ZONE of bands (range)"
         elif bb_pos > 5:
-            bb_state = f"Prix dans la MOITIE INFERIEURE des bandes (pression baissiere)"
+            bb_state = f"Price in LOWER HALF of bands (bearish pressure)"
         else:
-            bb_state = f"Prix SUR LA BANDE INFERIEURE (surf baissier, possible cassure)"
+            bb_state = f"Price ON LOWER BAND (bearish ride, possible breakout)"
         
-        # Distances relatives en ATR
+        # Relative distances in ATR
         dist_upper = ind.get('dist_bb_upper_atr')
         dist_lower = ind.get('dist_bb_lower_atr')
         dist_str = []
         if dist_upper is not None:
-            dist_str.append(f"dist Haut: {dist_upper} ATR")
+            dist_str.append(f"Upper dist: {dist_upper} ATR")
         if dist_lower is not None:
-            dist_str.append(f"dist Bas: {dist_lower} ATR")
+            dist_str.append(f"Lower dist: {dist_lower} ATR")
         bb_dist_info = f" ({', '.join(dist_str)})" if dist_str else ""
         lines.append(f"Bollinger: {bb_state}{bb_dist_info}")
 
@@ -255,49 +279,49 @@ def _format_indicators_v2(ind: dict) -> str:
     dist_ema200 = ind.get('dist_ema200_atr')
     
     if ema20 is not None and current_price is not None:
-        vs_ema20 = "au-dessus" if current_price > ema20 else "sous"
-        ema20_str = f"EMA20: Prix {vs_ema20} l'EMA20 ({ema20:.5f})"
+        vs_ema20 = "above" if current_price > ema20 else "below"
+        ema20_str = f"EMA20: Price {vs_ema20} EMA20 ({ema20:.5f})"
         if dist_ema20 is not None:
             sign = "+" if dist_ema20 >= 0 else ""
             ema20_str += f" | Dist: {sign}{dist_ema20} ATR"
         if ema20_slope:
-            ema20_str += f" | Pente: {ema20_slope}"
+            ema20_str += f" | Slope: {_translate_trend(ema20_slope)}"
         lines.append(ema20_str)
         
     if ema200 is not None and current_price is not None:
-        vs_ema200 = "au-dessus" if current_price > ema200 else "sous"
-        ema200_str = f"EMA200: Prix {vs_ema200} l'EMA200 ({ema200:.5f})"
+        vs_ema200 = "above" if current_price > ema200 else "below"
+        ema200_str = f"EMA200: Price {vs_ema200} EMA200 ({ema200:.5f})"
         if dist_ema200 is not None:
             sign = "+" if dist_ema200 >= 0 else ""
             ema200_str += f" | Dist: {sign}{dist_ema200} ATR"
         if ema200_slope:
-            ema200_str += f" | Pente: {ema200_slope}"
+            ema200_str += f" | Slope: {_translate_trend(ema200_slope)}"
         lines.append(ema200_str)
 
-    # --- ATR: volatilite ---
+    # --- ATR: volatility ---
     atr = ind.get('atr_14')
     if atr is not None and current_price is not None:
         atr_pct = (atr / current_price) * 100 if current_price else 0
         if atr_pct > 0.5:
-            atr_state = f"ATR 14: {atr:.5f} - VOLATILITE ELEVEE ({atr_pct:.2f}% du prix)"
+            atr_state = f"ATR 14: {atr:.5f} - HIGH VOLATILITY ({atr_pct:.2f}% of price)"
         elif atr_pct > 0.2:
-            atr_state = f"ATR 14: {atr:.5f} - Volatilite moderee ({atr_pct:.2f}% du prix)"
+            atr_state = f"ATR 14: {atr:.5f} - Moderate volatility ({atr_pct:.2f}% of price)"
         else:
-            atr_state = f"ATR 14: {atr:.5f} - Volatilite faible ({atr_pct:.2f}% du prix)"
+            atr_state = f"ATR 14: {atr:.5f} - Low volatility ({atr_pct:.2f}% of price)"
         lines.append(atr_state)
 
-    # --- Tendance ---
-    trend_ct = ind.get('trend_short', 'N/A')
-    trend_mt = ind.get('trend_medium', 'N/A')
-    lines.append(f"Tendance CT: {trend_ct}, MT: {trend_mt}")
+    # --- Trend ---
+    trend_ct = _translate_trend(ind.get('trend_short', 'N/A'))
+    trend_mt = _translate_trend(ind.get('trend_medium', 'N/A'))
+    lines.append(f"ST Trend: {trend_ct}, MT Trend: {trend_mt}")
 
-    # --- Niveaux 24h ---
+    # --- 24h Levels ---
     high24 = ind.get('high_24h')
     low24 = ind.get('low_24h')
     if high24 is not None and low24 is not None and current_price is not None:
         pct_from_high = ((high24 - current_price) / current_price * 100) if current_price else 0
         pct_from_low = ((current_price - low24) / current_price * 100) if current_price else 0
-        lines.append(f"Range 24h: {low24:.5f} - {high24:.5f} (prix a {pct_from_low:.1f}% du bas, {pct_from_high:.1f}% du haut)")
+        lines.append(f"24h Range: {low24:.5f} - {high24:.5f} (price is {pct_from_low:.1f}% from low, {pct_from_high:.1f}% from high)")
 
     # --- Spread ---
     spread = ind.get('spread')
@@ -305,23 +329,23 @@ def _format_indicators_v2(ind: dict) -> str:
     if spread is not None:
         spread_str = f"Spread: {spread:.1f} pips"
         if spread_atr is not None:
-            spread_str += f" ({spread_atr}% de l'ATR 14)"
+            spread_str += f" ({spread_atr}% of ATR 14)"
         lines.append(spread_str)
 
     # --- Volume & VWAP ---
     vol_pct = ind.get('volume_anomaly_pct')
     if vol_pct is not None:
         if vol_pct > 200:
-            lines.append(f"Volume: ANOMALIE MAJEURE ({vol_pct:.0f}% de la moyenne) - Forte participation")
+            lines.append(f"Volume: MAJOR ANOMALY ({vol_pct:.0f}% of average) - Strong participation")
         elif vol_pct > 130:
-            lines.append(f"Volume: Actif ({vol_pct:.0f}% de la moyenne)")
+            lines.append(f"Volume: Active ({vol_pct:.0f}% of average)")
         else:
-            lines.append(f"Volume: Normal/Faible ({vol_pct:.0f}% de la moyenne)")
+            lines.append(f"Volume: Normal/Low ({vol_pct:.0f}% of average)")
 
     vwap = ind.get('daily_vwap')
     if vwap is not None and current_price is not None:
-        vs_vwap = "au-dessus" if current_price > vwap else "sous"
-        lines.append(f"VWAP: Prix {vs_vwap} le VWAP Journalier ({vwap:.5f})")
+        vs_vwap = "above" if current_price > vwap else "below"
+        lines.append(f"VWAP: Price {vs_vwap} Daily VWAP ({vwap:.5f})")
 
     return "\n".join(lines)
 
@@ -339,10 +363,10 @@ def _format_ichimoku(ind: dict) -> str:
         f"Tenkan: {ind.get('ichimoku_tenkan', '?')}",
         f"Kijun: {ind.get('ichimoku_kijun', '?')}",
         cloud_str,
-        f"Cloud Couleur: {ind.get('ichimoku_cloud_color', '?')}",
-        f"Prix vs Cloud: {ind.get('ichimoku_price_vs_cloud', '?')}",
-        f"Tenkan/Kijun Cross: {ind.get('ichimoku_tenkan_kijun_cross', '?')}",
-        f"Tendance Ichimoku: {ind.get('ichimoku_trend', '?')}",
+        f"Cloud Color: {_translate_trend(ind.get('ichimoku_cloud_color', '?'))}",
+        f"Price vs Cloud: {_translate_trend(ind.get('ichimoku_price_vs_cloud', '?'))}",
+        f"Tenkan/Kijun Cross: {_translate_trend(ind.get('ichimoku_tenkan_kijun_cross', '?'))}",
+        f"Ichimoku Trend: {_translate_trend(ind.get('ichimoku_trend', '?'))}",
     ]
     return "\n".join(lines)
 
@@ -351,11 +375,11 @@ def _format_pivots(ind: dict) -> str:
     dist_support = ind.get('dist_pivot_support_atr')
     dist_resistance = ind.get('dist_pivot_resistance_atr')
     
-    support_str = f"Support le plus proche: {ind.get('pivot_nearest_support', '?')}"
+    support_str = f"Nearest Support: {ind.get('pivot_nearest_support', '?')}"
     if dist_support is not None:
         support_str += f" | Dist: +{dist_support} ATR"
         
-    resistance_str = f"Resistance la plus proche: {ind.get('pivot_nearest_resistance', '?')}"
+    resistance_str = f"Nearest Resistance: {ind.get('pivot_nearest_resistance', '?')}"
     if dist_resistance is not None:
         resistance_str += f" | Dist: +{dist_resistance} ATR"
         
@@ -371,12 +395,12 @@ def _format_pivots(ind: dict) -> str:
 
 def _format_ocr(ocr: dict) -> str:
     lines = [
-        f"Phase de marche: {ocr.get('market_phase', '?')}",
-        f"Patterns chart: {ocr.get('chart_patterns', '?')}",
-        f"Supports visuels: {ocr.get('support_levels', '?')}",
-        f"Resistances visuelles: {ocr.get('resistance_levels', '?')}",
+        f"Market phase: {ocr.get('market_phase', '?')}",
+        f"Chart patterns: {ocr.get('chart_patterns', '?')}",
+        f"Visual supports: {ocr.get('support_levels', '?')}",
+        f"Visual resistances: {ocr.get('resistance_levels', '?')}",
         f"Trendlines: {ocr.get('trendlines', '?')}",
-        f"Chandeliers visuels: {ocr.get('candlestick_visual', '?')}",
+        f"Visual candlesticks: {ocr.get('candlestick_visual', '?')}",
         f"Price action: {ocr.get('price_action_notes', '?')}",
     ]
     return "\n".join(lines)
@@ -394,25 +418,27 @@ def _format_trade_history(history: list) -> str:
             profit_str = str(profit_val)
         lines.append(
             f"- {t.get('direction', '?')} {t.get('symbol', '?')} | "
-            f"Confiance: {t.get('confidence', '?')}% | "
+            f"Confidence: {t.get('confidence', '?')}% | "
             f"Profit: {profit_str} | "
             f"Date: {t.get('opened_at', '?')[:10]}"
         )
-    return "\n".join(lines) if lines else "Aucun historique."
+    return "\n".join(lines) if lines else "No history."
+
 
 def _format_performance(stats: dict) -> str:
-    """Formate les statistiques de performance (v2.1)."""
+    """Formats performance stats (v2.1)."""
     lines = [
-        f"Total trades fermes: {stats.get('total_closed', 0)}",
-        f"Gagnes: {stats.get('wins', 0)}, Perdus: {stats.get('losses', 0)}",
+        f"Total closed trades: {stats.get('total_closed', 0)}",
+        f"Wins: {stats.get('wins', 0)}, Losses: {stats.get('losses', 0)}",
         f"Win rate: {stats.get('win_rate', 0)}%",
-        f"Profit total: {stats.get('total_profit', 0)}",
-        f"Confiance moyenne: {stats.get('avg_confidence', 0)}%",
+        f"Total profit: {stats.get('total_profit', 0)}",
+        f"Average confidence: {stats.get('avg_confidence', 0)}%",
     ]
     return "\n".join(lines)
 
+
 def _format_indicators(ind: dict) -> str:
-    """Formateur legacy."""
+    """Legacy formatter."""
     lines = []
     for key, label in [
         ("rsi_14", "RSI 14"), ("ema_20", "EMA 20"), ("ema_200", "EMA 200"),
@@ -420,14 +446,14 @@ def _format_indicators(ind: dict) -> str:
     ]:
         if ind.get(key) is not None:
             lines.append(f"- {label}: {ind[key]}")
-    lines.append(f"- Tendance CT: {ind.get('trend_short', 'N/A')}")
-    lines.append(f"- Tendance MT: {ind.get('trend_medium', 'N/A')}")
+    lines.append(f"- ST Trend: {_translate_trend(ind.get('trend_short', 'N/A'))}")
+    lines.append(f"- MT Trend: {_translate_trend(ind.get('trend_medium', 'N/A'))}")
     return "\n".join(lines)
 
 
 def _format_calendar(events: list) -> str:
     if not events:
-        return "Aucun evenement majeur prevu."
+        return "No major events scheduled."
     lines = []
     for ev in events[:15]:
         impact = "HIGH" if ev.get("impact") == "high" else "MED" if ev.get("impact") == "medium" else "LOW"
@@ -442,7 +468,7 @@ def _format_calendar(events: list) -> str:
 
 def _format_positions(positions: list, account: dict) -> str:
     if not positions:
-        return "Aucune position ouverte."
+        return "No open positions."
     lines = [f"Balance: {account.get('balance', 'N/A')}, Equity: {account.get('equity', 'N/A')}"]
     for p in positions:
         pnl = p.get("profit", 0)
@@ -453,4 +479,3 @@ def _format_positions(positions: list, account: dict) -> str:
             f"SL: {p.get('sl', 'N/A')} | TP: {p.get('tp', 'N/A')}"
         )
     return "\n".join(lines)
-

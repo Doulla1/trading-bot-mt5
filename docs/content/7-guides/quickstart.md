@@ -17,18 +17,82 @@ python run.py --symbol EURUSD --once
 
 Execute **un seul cycle** sur EURUSD (indicateurs, OCR, DeepSeek), puis affiche les stats.
 
-## 2. Mode continu (tous les actifs)
+## 2. Gestion simplifiée via le script Helper (PowerShell)
+
+Un script helper [manage.ps1](../../../manage.ps1) est disponible à la racine pour simplifier toutes vos actions courantes :
 
 ```powershell
-# Lancer les 6 actifs en fond (sans fenetre)
-.\scripts\start-all.ps1
+# Vérifier si le bot ou le dashboard Streamlit tournent en arrière-plan
+powershell -ExecutionPolicy Bypass -File .\manage.ps1 status
 
-# Voir l'etat
-.\scripts\start-all.ps1 -Status
+# Démarrer le bot multi-actifs (run_multi.py) en arrière-plan (sans fenêtre console)
+powershell -ExecutionPolicy Bypass -File .\manage.ps1 start
 
-# Arreter
-.\scripts\start-all.ps1 -Stop
+# Arrêter proprement le bot en arrière-plan (tue le processus run_multi.py actif)
+powershell -ExecutionPolicy Bypass -File .\manage.ps1 stop
+
+# Lancer le dashboard Streamlit (exécute via le module python si streamlit n'est pas dans le PATH)
+powershell -ExecutionPolicy Bypass -File .\manage.ps1 dashboard
+
+# Lancer un backtest (EURUSD par défaut sur mai 2026)
+powershell -ExecutionPolicy Bypass -File .\manage.ps1 backtest -Symbol EURUSD -From 2026-05-01 -To 2026-05-31
+
+# Consulter l'historique des trades fermés de toutes les bases de données
+powershell -ExecutionPolicy Bypass -File .\manage.ps1 query
+
+# Afficher l'aide du helper
+powershell -ExecutionPolicy Bypass -File .\manage.ps1 help
 ```
+
+---
+
+## 3. Liste de toutes les commandes brutes (sans le helper)
+
+Si vous préférez exécuter les commandes Python et Windows PowerShell brutes directement, voici le récapitulatif :
+
+### Gestion des processus
+*   **Vérifier les processus actifs du bot et du dashboard** :
+    ```powershell
+    Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match "run_multi\.py|dashboard\.py"} | Select-Object ProcessId, CommandLine
+    ```
+*   **Démarrer le bot multi-actifs en arrière-plan** :
+    ```powershell
+    Start-Process -FilePath "pythonw.exe" -ArgumentList "run_multi.py" -WindowStyle Hidden
+    ```
+*   **Arrêter le bot multi-actifs en arrière-plan** :
+    ```powershell
+    Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match "run_multi\.py"} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    ```
+
+### Lancement des applications et outils
+*   **Lancer le Dashboard Streamlit (via module Python)** :
+    ```powershell
+    python -m streamlit run dashboard.py
+    ```
+*   **Consulter l'historique des trades** :
+    ```powershell
+    python query_trades.py
+    ```
+*   **Lancer un backtest** :
+    ```powershell
+    python backtest.py --symbol EURUSD --from 2026-05-01 --to 2026-05-31
+    ```
+*   **Corriger / Migrer la base de données** :
+    ```powershell
+    python fix_db.py
+    ```
+*   **Envoyer le rapport quotidien (par e-mail)** :
+    ```powershell
+    python scripts/send_report.py
+    ```
+*   **Lancer le bot pour un symbole unique en mode console (continu)** :
+    ```powershell
+    python run.py --symbol EURUSD
+    ```
+
+---
+
+## 4. Actifs gérés en multi-symboles
 
 | Symbole | Timeframe | Magic | Commentaire |
 |---|---|---|---|
@@ -38,12 +102,6 @@ Execute **un seul cycle** sur EURUSD (indicateurs, OCR, DeepSeek), puis affiche 
 | USDJPY | M15 | 73459 | Dollar/Yen |
 | USDCHF | M15 | 73460 | Dollar/Franc suisse |
 | XAUUSD | H1 | 73461 | Or (H1 car + volatil) |
-
-## 3. Mode continu (symbole unique)
-
-```powershell
-python run.py --symbol EURUSD
-```
 
 ## 4. Auto-start au demarrage Windows
 

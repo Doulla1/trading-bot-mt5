@@ -8,11 +8,20 @@ import numpy as np
 from loguru import logger
 
 
-def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None, df_h4: pd.DataFrame | None = None, spread: float | None = None) -> dict:
+def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None, df_h4: pd.DataFrame | None = None, df_d1: pd.DataFrame | None = None, spread: float | None = None) -> dict:
     """Calcule tous les indicateurs a partir d'un DataFrame OHLCV M15 (+ H1/H4 optionnels)."""
     if df.empty or len(df) < 50:
         logger.warning("Pas assez de donnees pour les indicateurs (min 50 bougies)")
         return {}
+
+    # Ensure df index is a DatetimeIndex to support daily resampling and VWAP date grouping
+    if not isinstance(df.index, pd.DatetimeIndex):
+        if "datetime" in df.columns:
+            df = df.set_index("datetime")
+        elif "time" in df.columns:
+            df = df.set_index("time")
+        else:
+            logger.warning("compute_all: DataFrame index is not DatetimeIndex and no datetime/time column found")
 
     close = df["close"].astype(float)
     high = df["high"].astype(float)
@@ -82,7 +91,7 @@ def compute_all(df: pd.DataFrame, df_h1: pd.DataFrame | None = None, df_h4: pd.D
     result.update(ichimoku)
 
     # --- Pivot Points (daily) v2.0 ---
-    pivots = _pivot_points(high, low, close)
+    pivots = _pivot_points(high, low, close, df_d1=df_d1, df_m15=df)
     result.update(pivots)
 
     # --- Prix et range ---
@@ -298,12 +307,33 @@ def _ichimoku(high: pd.Series, low: pd.Series, close: pd.Series,
         )
 
 
-def _pivot_points(high: pd.Series, low: pd.Series, close: pd.Series) -> dict:
-    """Points pivots classiques."""
+def _pivot_points(high: pd.Series, low: pd.Series, close: pd.Series, df_d1: pd.DataFrame | None = None, df_m15: pd.DataFrame | None = None) -> dict:
+    """Points pivots classiques basés sur les bougies journalières (D1)."""
     try:
-        h_prev = float(high.iloc[-2])
-        l_prev = float(low.iloc[-2])
-        c_prev = float(close.iloc[-2])
+        # 1. Utilisation des données réelles D1 si fournies
+        if df_d1 is not None and not df_d1.empty and len(df_d1) >= 2:
+            # iloc[-2] est la dernière bougie D1 fermée, iloc[-1] est le jour en cours
+            h_prev = float(df_d1["high"].iloc[-2])
+            l_prev = float(df_d1["low"].iloc[-2])
+            c_prev = float(df_d1["close"].iloc[-2])
+        # 2. Resampling des données M15 en D1 si l'index est un DatetimeIndex (fallback/backtest)
+        elif df_m15 is not None and not df_m15.empty and isinstance(df_m15.index, pd.DatetimeIndex):
+            df_daily = df_m15.resample('D').agg({'high': 'max', 'low': 'min', 'close': 'last'}).dropna()
+            if len(df_daily) >= 2:
+                h_prev = float(df_daily["high"].iloc[-2])
+                l_prev = float(df_daily["low"].iloc[-2])
+                c_prev = float(df_daily["close"].iloc[-2])
+            else:
+                # Fallback ultime aux bougies individuelles de l'index passé (comportement d'origine)
+                h_prev = float(high.iloc[-2])
+                l_prev = float(low.iloc[-2])
+                c_prev = float(close.iloc[-2])
+        else:
+            # Fallback ultime
+            h_prev = float(high.iloc[-2])
+            l_prev = float(low.iloc[-2])
+            c_prev = float(close.iloc[-2])
+
         pp = (h_prev + l_prev + c_prev) / 3
         r1 = 2 * pp - l_prev
         s1 = 2 * pp - h_prev
@@ -326,7 +356,8 @@ def _pivot_points(high: pd.Series, low: pd.Series, close: pd.Series) -> dict:
             "pivot_nearest_support": round(nearest_support, 5) if nearest_support else None,
             "pivot_nearest_resistance": round(nearest_resistance, 5) if nearest_resistance else None,
         }
-    except Exception:
+    except Exception as e:
+        logger.error(f"Erreur calcul pivot points: {e}")
         return {}
 
 

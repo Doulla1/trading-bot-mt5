@@ -162,6 +162,7 @@ def run_once() -> None:
         df_m15 = bridge.get_rates(sym, "M15", count=200)
         df_h1 = bridge.get_rates(sym, "H1", count=100)
         df_h4 = bridge.get_rates(sym, "H4", count=50)
+        df_d1 = bridge.get_rates(sym, "D1", count=2)
         
         # Recupere le spread en pips
         symbol_info = bridge.get_symbol_info(sym)
@@ -173,7 +174,7 @@ def run_once() -> None:
             else:
                 spread = float(spread_points)
                 
-        indicators_data = indicators.compute_all(df_m15, df_h1, df_h4, spread=spread)
+        indicators_data = indicators.compute_all(df_m15, df_h1, df_h4, df_d1=df_d1, spread=spread)
 
         # 3. Screenshot (debug) + Chart genere pour OCR v2.1
         screenshot_path = screenshots.capture_chart(sym)

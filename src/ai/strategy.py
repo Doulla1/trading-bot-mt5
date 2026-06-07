@@ -448,7 +448,7 @@ def manage_open_positions() -> int:
 
 
 def is_weekend_closure(dt: datetime) -> bool:
-    """Détermine si on est dans la période de fermeture du week-end (de vendredi 20h30 UTC à lundi 00h00 UTC)."""
+    """Détermine si on est dans la période de fermeture du week-end (de vendredi 20h30 UTC à dimanche 22h00 UTC)."""
     if dt.tzinfo is None:
         dt_utc = dt.replace(tzinfo=timezone.utc)
     else:
@@ -458,8 +458,11 @@ def is_weekend_closure(dt: datetime) -> bool:
     if weekday == 4:  # Vendredi
         if dt_utc.hour > 20 or (dt_utc.hour == 20 and dt_utc.minute >= 30):
             return True
-    elif weekday in (5, 6):  # Samedi, Dimanche
+    elif weekday == 5:  # Samedi
         return True
+    elif weekday == 6:  # Dimanche (Fermé avant 22h00 UTC)
+        if dt_utc.hour < 22:
+            return True
     return False
 
 

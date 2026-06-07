@@ -1,8 +1,8 @@
-"""Tests unitaires pour le module prompts (prompts.py).
+"""Unit tests for the prompts module (prompts.py).
 
-Couvre le changement v3.0:
-5. _format_indicators_v2() - conversion des valeurs brutes en etats semantiques
-   pour les LLMs (RSI zones, MACD croisement/zone, Bollinger semantique, ATR volatilite)
+Covers v3.0 changes:
+5. _format_indicators_v2() - conversion of raw values to semantic states
+   for LLMs (RSI zones, MACD crossover/zone, Bollinger semantic, ATR volatility)
 """
 
 import pytest
@@ -10,202 +10,199 @@ from src.ai.prompts import _format_indicators_v2
 
 
 # ============================================================================
-# RSI: zones semantiques
+# RSI: semantic zones
 # ============================================================================
 
 
 class TestFormatIndicatorsV2RSI:
-    """Tests de formatage semantique du RSI."""
+    """Tests of semantic formatting of RSI."""
 
     def test_rsi_surachat_above_75(self):
-        """RSI > 75 -> zone SURACHAT."""
+        """RSI > 75 -> OVERBOUGHT zone."""
         result = _format_indicators_v2({"rsi_14": 78.5})
-        assert "SURACHAT" in result
+        assert "OVERBOUGHT" in result
         assert "78.5" in result
 
     def test_rsi_haussier_above_60(self):
-        """RSI entre 60 et 75 -> Tendance haussiere."""
+        """RSI between 60 and 75 -> Bullish trend."""
         result = _format_indicators_v2({"rsi_14": 65.0})
-        assert "Tendance haussiere" in result
-        assert "SURACHAT" not in result
+        assert "Bullish trend" in result
+        assert "OVERBOUGHT" not in result
 
     def test_rsi_neutre_above_40(self):
-        """RSI entre 40 et 60 -> Zone neutre."""
+        """RSI between 40 and 60 -> Neutral zone."""
         result = _format_indicators_v2({"rsi_14": 50.0})
-        assert "Zone neutre" in result
+        assert "Neutral zone" in result
 
     def test_rsi_baissier_above_25(self):
-        """RSI entre 25 et 40 -> Tendance baissiere."""
+        """RSI between 25 and 40 -> Bearish trend."""
         result = _format_indicators_v2({"rsi_14": 30.0})
-        assert "Tendance baissiere" in result
+        assert "Bearish trend" in result
 
     def test_rsi_survente_below_25(self):
-        """RSI < 25 -> zone SURVENTE."""
+        """RSI < 25 -> OVERSOLD zone."""
         result = _format_indicators_v2({"rsi_14": 18.0})
-        assert "SURVENTE" in result
+        assert "OVERSOLD" in result
         assert "18.0" in result
 
     def test_rsi_none_not_included(self):
-        """RSI None -> pas de ligne RSI dans le resultat."""
+        """RSI None -> no RSI line in the result."""
         result = _format_indicators_v2({})
         assert "RSI" not in result
 
     # --- Boundary values ---
 
     def test_rsi_boundary_75_is_surachat(self):
-        """RSI = 75.0 est dans > 75? Non, 75 > 75 = False, donc c'est haussier (60-75)."""
+        """RSI = 75.0: 75 > 75 = False -> Bullish trend."""
         result = _format_indicators_v2({"rsi_14": 75.0})
-        # 75 > 75 = False, 75 > 60 = True -> "Tendance haussiere"
-        assert "Tendance haussiere" in result
-        assert "SURACHAT" not in result
+        assert "Bullish trend" in result
+        assert "OVERBOUGHT" not in result
 
     def test_rsi_boundary_60_is_neutre(self):
-        """RSI = 60.0: 60 > 75? Non. 60 > 60? Non. 60 > 40? Oui -> neutre."""
+        """RSI = 60.0: 60 > 75? No. 60 > 60? No. 60 > 40? Yes -> Neutral zone."""
         result = _format_indicators_v2({"rsi_14": 60.0})
-        assert "Zone neutre" in result
+        assert "Neutral zone" in result
 
     def test_rsi_boundary_40_is_baissier(self):
-        """RSI = 40.0: 40 > 75? Non. 40 > 60? Non. 40 > 40? Non. 40 > 25? Oui -> baissier."""
+        """RSI = 40.0: 40 > 75? No. 40 > 60? No. 40 > 40? No. 40 > 25? Yes -> Bearish trend."""
         result = _format_indicators_v2({"rsi_14": 40.0})
-        assert "Tendance baissiere" in result
+        assert "Bearish trend" in result
 
     def test_rsi_boundary_25_is_survente(self):
-        """RSI = 25.0: 25 > 25 = False -> SURVENTE."""
+        """RSI = 25.0: 25 > 25 = False -> OVERSOLD."""
         result = _format_indicators_v2({"rsi_14": 25.0})
-        assert "SURVENTE" in result
+        assert "OVERSOLD" in result
 
 
 # ============================================================================
-# MACD: croisement et zone
+# MACD: crossover and zone
 # ============================================================================
 
 
 class TestFormatIndicatorsV2MACD:
-    """Tests de formatage semantique du MACD."""
+    """Tests of semantic formatting of MACD."""
 
     def test_macd_above_signal_positive_zone(self):
-        """MACD > Signal en zone positive -> momentum haussier."""
+        """MACD > Signal in positive zone -> bullish momentum."""
         result = _format_indicators_v2({
             "macd_line": 0.002,
             "macd_signal": 0.001,
             "macd_histogram": 0.001,
         })
-        assert "MACD au-dessus du Signal" in result
-        assert "zone positive" in result
-        assert "histogramme haussier" in result
+        assert "MACD above Signal" in result
+        assert "positive zone" in result
+        assert "bullish histogram" in result
 
     def test_macd_below_signal_negative_zone(self):
-        """MACD < Signal en zone negative -> momentum baissier."""
+        """MACD < Signal in negative zone -> bearish momentum."""
         result = _format_indicators_v2({
             "macd_line": -0.002,
             "macd_signal": -0.001,
             "macd_histogram": -0.001,
         })
-        assert "MACD sous le Signal" in result
-        assert "zone negative" in result
-        assert "histogramme baissier" in result
+        assert "MACD below Signal" in result
+        assert "negative zone" in result
+        assert "bearish histogram" in result
 
     def test_macd_above_signal_negative_zone(self):
-        """MACD > Signal mais en zone negative."""
+        """MACD > Signal but in negative zone."""
         result = _format_indicators_v2({
             "macd_line": -0.001,
             "macd_signal": -0.002,
             "macd_histogram": 0.001,
         })
-        assert "MACD au-dessus du Signal" in result
-        assert "zone negative" in result
-        assert "histogramme haussier" in result
+        assert "MACD above Signal" in result
+        assert "negative zone" in result
+        assert "bullish histogram" in result
 
     def test_macd_equal_to_signal(self):
-        """MACD == Signal -> MACD sous le Signal (car <=)."""
+        """MACD == Signal -> MACD below Signal (since <=)."""
         result = _format_indicators_v2({
             "macd_line": 0.001,
             "macd_signal": 0.001,
             "macd_histogram": 0.0,
         })
-        # macd_line > macd_signal? 0.001 > 0.001 = False -> "sous le Signal"
-        assert "MACD sous le Signal" in result
+        assert "MACD below Signal" in result
 
     def test_macd_histogram_none_still_formats(self):
-        """MACD sans histogramme -> formatte sans la partie histogramme."""
+        """MACD without histogram -> formats without histogram part."""
         result = _format_indicators_v2({
             "macd_line": 0.002,
             "macd_signal": 0.001,
         })
-        assert "MACD au-dessus du Signal" in result
-        assert "zone positive" in result
-        # histogram part should be empty
+        assert "MACD above Signal" in result
+        assert "positive zone" in result
 
     def test_macd_line_none_not_included(self):
-        """MACD line None -> pas de ligne MACD."""
+        """MACD line None -> no MACD line."""
         result = _format_indicators_v2({"macd_signal": 0.001})
         assert "MACD" not in result
 
     def test_macd_signal_none_not_included(self):
-        """MACD signal None -> pas de ligne MACD."""
+        """MACD signal None -> no MACD line."""
         result = _format_indicators_v2({"macd_line": 0.001})
         assert "MACD" not in result
 
 
 # ============================================================================
-# Bollinger Bands: position semantique
+# Bollinger Bands: semantic position
 # ============================================================================
 
 
 class TestFormatIndicatorsV2Bollinger:
-    """Tests de formatage semantique des bandes de Bollinger."""
+    """Tests of semantic formatting of Bollinger Bands."""
 
     def test_bb_sur_bande_superieure(self):
-        """BB > 95 -> SUR LA BANDE SUPERIEURE."""
+        """BB > 95 -> Price ON UPPER BAND."""
         result = _format_indicators_v2({"bb_position_pct": 97.0})
-        assert "SUR LA BANDE SUPERIEURE" in result
+        assert "Price ON UPPER BAND" in result
 
     def test_bb_moitie_superieure(self):
-        """BB entre 70 et 95 -> MOITIE SUPERIEURE."""
+        """BB between 70 and 95 -> UPPER HALF."""
         result = _format_indicators_v2({"bb_position_pct": 80.0})
-        assert "MOITIE SUPERIEURE" in result
+        assert "UPPER HALF" in result
 
     def test_bb_zone_mediane(self):
-        """BB entre 30 et 70 -> ZONE MEDIANE."""
+        """BB between 30 and 70 -> MIDDLE ZONE."""
         result = _format_indicators_v2({"bb_position_pct": 50.0})
-        assert "ZONE MEDIANE" in result
+        assert "MIDDLE ZONE" in result
 
     def test_bb_moitie_inferieure(self):
-        """BB entre 5 et 30 -> MOITIE INFERIEURE."""
+        """BB between 5 and 30 -> LOWER HALF."""
         result = _format_indicators_v2({"bb_position_pct": 15.0})
-        assert "MOITIE INFERIEURE" in result
+        assert "LOWER HALF" in result
 
     def test_bb_sur_bande_inferieure(self):
-        """BB < 5 -> SUR LA BANDE INFERIEURE."""
+        """BB < 5 -> Price ON LOWER BAND."""
         result = _format_indicators_v2({"bb_position_pct": 2.0})
-        assert "SUR LA BANDE INFERIEURE" in result
+        assert "Price ON LOWER BAND" in result
 
     def test_bb_none_not_included(self):
-        """BB None -> pas de ligne Bollinger."""
+        """BB None -> no Bollinger line."""
         result = _format_indicators_v2({})
         assert "Bollinger" not in result
 
     # --- Boundary values ---
 
     def test_bb_boundary_95_is_moitie_superieure(self):
-        """BB = 95: 95 > 95? Non. 95 > 70? Oui -> MOITIE SUPERIEURE."""
+        """BB = 95: 95 > 95? No. 95 > 70? Yes -> UPPER HALF."""
         result = _format_indicators_v2({"bb_position_pct": 95.0})
-        assert "MOITIE SUPERIEURE" in result
+        assert "UPPER HALF" in result
 
     def test_bb_boundary_70_is_zone_mediane(self):
-        """BB = 70: 70 > 95? Non. 70 > 70? Non. 70 > 30? Oui -> ZONE MEDIANE."""
+        """BB = 70: 70 > 95? No. 70 > 70? No. 70 > 30? Yes -> MIDDLE ZONE."""
         result = _format_indicators_v2({"bb_position_pct": 70.0})
-        assert "ZONE MEDIANE" in result
+        assert "MIDDLE ZONE" in result
 
     def test_bb_boundary_30_is_moitie_inferieure(self):
-        """BB = 30: 30 > 30? Non. 30 > 5? Oui -> MOITIE INFERIEURE."""
+        """BB = 30: 30 > 30? No. 30 > 5? Yes -> LOWER HALF."""
         result = _format_indicators_v2({"bb_position_pct": 30.0})
-        assert "MOITIE INFERIEURE" in result
+        assert "LOWER HALF" in result
 
     def test_bb_boundary_5_is_sur_bande_inferieure(self):
-        """BB = 5: 5 > 5? Non -> SUR LA BANDE INFERIEURE."""
+        """BB = 5: 5 > 5? No -> Price ON LOWER BAND."""
         result = _format_indicators_v2({"bb_position_pct": 5.0})
-        assert "SUR LA BANDE INFERIEURE" in result
+        assert "Price ON LOWER BAND" in result
 
 
 # ============================================================================
@@ -214,120 +211,117 @@ class TestFormatIndicatorsV2Bollinger:
 
 
 class TestFormatIndicatorsV2MA:
-    """Tests de formatage des moving averages."""
+    """Tests of moving averages formatting."""
 
     def test_ema20_price_above(self):
-        """Prix au-dessus de l'EMA20."""
+        """Price above EMA20."""
         result = _format_indicators_v2({
             "ema_20": 1.0830,
             "current_price": 1.0850,
         })
-        assert "au-dessus" in result
+        assert "above" in result
         assert "EMA20" in result
 
     def test_ema20_price_below(self):
-        """Prix sous l'EMA20."""
+        """Price below EMA20."""
         result = _format_indicators_v2({
             "ema_20": 1.0870,
             "current_price": 1.0850,
         })
-        assert "sous" in result
+        assert "below" in result
         assert "EMA20" in result
 
     def test_ema20_none_not_included(self):
-        """EMA20 None -> pas de ligne EMA20."""
+        """EMA20 None -> no EMA20 line."""
         result = _format_indicators_v2({"current_price": 1.0850})
         assert "EMA20" not in result
 
     def test_ema200_price_above(self):
-        """Prix au-dessus de l'EMA200."""
+        """Price above EMA200."""
         result = _format_indicators_v2({
             "ema_200": 1.0800,
             "current_price": 1.0850,
         })
-        assert "au-dessus" in result
+        assert "above" in result
         assert "EMA200" in result
 
     def test_ema200_none_not_included(self):
-        """EMA200 None -> pas de ligne EMA200."""
+        """EMA200 None -> no EMA200 line."""
         result = _format_indicators_v2({"current_price": 1.0850})
         assert "EMA200" not in result
 
 
 # ============================================================================
-# ATR: volatilite
+# ATR: volatility
 # ============================================================================
 
 
 class TestFormatIndicatorsV2ATR:
-    """Tests de formatage semantique de l'ATR."""
+    """Tests of ATR semantic formatting."""
 
     def test_atr_volatilite_elevee(self):
-        """ATR > 0.5% du prix -> VOLATILITE ELEVEE."""
+        """ATR > 0.5% of price -> HIGH VOLATILITY."""
         result = _format_indicators_v2({
             "atr_14": 0.0080,
-            "current_price": 1.0850,  # 0.0080/1.0850 = 0.74% > 0.5%
+            "current_price": 1.0850,
         })
-        assert "VOLATILITE ELEVEE" in result
+        assert "HIGH VOLATILITY" in result
 
     def test_atr_volatilite_moderee(self):
-        """ATR entre 0.2% et 0.5% du prix -> Volatilite moderee."""
+        """ATR between 0.2% and 0.5% of price -> Moderate volatility."""
         result = _format_indicators_v2({
             "atr_14": 0.0040,
-            "current_price": 1.0850,  # 0.0040/1.0850 = 0.37%
+            "current_price": 1.0850,
         })
-        assert "Volatilite moderee" in result
+        assert "Moderate volatility" in result
 
     def test_atr_volatilite_faible(self):
-        """ATR < 0.2% du prix -> Volatilite faible."""
+        """ATR < 0.2% of price -> Low volatility."""
         result = _format_indicators_v2({
             "atr_14": 0.0010,
-            "current_price": 1.0850,  # 0.0010/1.0850 = 0.09%
+            "current_price": 1.0850,
         })
-        assert "Volatilite faible" in result
+        assert "Low volatility" in result
 
     def test_atr_none_not_included(self):
-        """ATR None -> pas de ligne ATR."""
+        """ATR None -> no ATR line."""
         result = _format_indicators_v2({})
         assert "ATR" not in result
 
     def test_atr_no_current_price_not_included(self):
-        """ATR sans current_price -> pas de ligne ATR."""
+        """ATR without current_price -> no ATR line."""
         result = _format_indicators_v2({"atr_14": 0.0040})
-        # ATR requires current_price to calculate pct
         assert "ATR" not in result
 
     # --- Boundary values ---
 
     def test_atr_boundary_0_5_pct_is_elevee(self):
-        """ATR = 0.5% exactement: > 0.5? Non. > 0.2? Oui -> moderee."""
+        """ATR = 0.5% exactly -> Moderate volatility."""
         result = _format_indicators_v2({
-            "atr_14": 0.005425,  # 1.0850 * 0.5%
+            "atr_14": 0.005425,
             "current_price": 1.0850,
         })
-        # 0.005425/1.0850 = 0.005, atr_pct > 0.5 = False
-        assert "Volatilite moderee" in result
+        assert "Moderate volatility" in result
 
     def test_atr_boundary_0_2_pct_is_faible(self):
-        """ATR = 0.2% exactement: > 0.5? Non. > 0.2? Non -> faible."""
+        """ATR = 0.2% exactly -> Low volatility."""
         result = _format_indicators_v2({
-            "atr_14": 0.00217,  # 1.0850 * 0.2%
+            "atr_14": 0.00217,
             "current_price": 1.0850,
         })
-        # 0.00217/1.0850 = 0.002, atr_pct > 0.2 = False
-        assert "Volatilite faible" in result
+        assert "Low volatility" in result
 
 
 # ============================================================================
-# Combinaison: tous les indicateurs ensemble
+# Combination: all indicators together
 # ============================================================================
 
 
 class TestFormatIndicatorsV2Full:
-    """Tests avec un jeu complet d'indicateurs."""
+    """Tests with a complete set of indicators."""
 
     def test_full_indicators_output(self):
-        """Tous les indicateurs presents -> toutes les sections."""
+        """All indicators present -> all sections."""
         ind = {
             "rsi_14": 55.0,
             "macd_line": 0.002,
@@ -351,51 +345,49 @@ class TestFormatIndicatorsV2Full:
         assert "EMA20" in result
         assert "EMA200" in result
         assert "ATR 14" in result
-        assert "Tendance CT" in result
-        assert "Range 24h" in result
+        assert "ST Trend" in result
+        assert "24h Range" in result
 
     def test_minimal_indicators_does_not_crash(self):
-        """Indicateurs vides -> pas de crash."""
+        """Empty indicators -> no crash."""
         result = _format_indicators_v2({})
         assert isinstance(result, str)
-        # Should only have trend line (with N/A)
-        assert "Tendance CT" in result
+        assert "ST Trend" in result
 
     def test_empty_string_does_not_break(self):
-        """Retourne toujours un string."""
+        """Always returns a string."""
         result = _format_indicators_v2({})
         assert isinstance(result, str)
         assert len(result) >= 0
 
     def test_rsi_zero_treated_as_survente(self):
-        """RSI = 0 -> SURVENTE."""
+        """RSI = 0 -> OVERSOLD."""
         result = _format_indicators_v2({"rsi_14": 0.0})
-        assert "SURVENTE" in result
+        assert "OVERSOLD" in result
 
     def test_rsi_100_treated_as_surachat(self):
-        """RSI = 100 -> SURACHAT."""
+        """RSI = 100 -> OVERBOUGHT."""
         result = _format_indicators_v2({"rsi_14": 100.0})
-        assert "SURACHAT" in result
+        assert "OVERBOUGHT" in result
 
     def test_current_price_none_no_ema_formatting(self):
-        """current_price None -> EMA20/EMA200 non formattes."""
+        """current_price None -> EMA20/EMA200 not formatted."""
         result = _format_indicators_v2({
             "ema_20": 1.0830,
             "ema_200": 1.0800,
         })
-        # EMA20/EMA200 need current_price
         assert "EMA20" not in result
         assert "EMA200" not in result
 
     def test_bb_zero_is_sur_bande_inferieure(self):
-        """BB = 0 -> SUR LA BANDE INFERIEURE."""
+        """BB = 0 -> Price ON LOWER BAND."""
         result = _format_indicators_v2({"bb_position_pct": 0.0})
-        assert "SUR LA BANDE INFERIEURE" in result
+        assert "Price ON LOWER BAND" in result
 
     def test_bb_100_is_sur_bande_superieure(self):
-        """BB = 100: 100 > 95 -> SUR LA BANDE SUPERIEURE."""
+        """BB = 100 -> Price ON UPPER BAND."""
         result = _format_indicators_v2({"bb_position_pct": 100.0})
-        assert "SUR LA BANDE SUPERIEURE" in result
+        assert "Price ON UPPER BAND" in result
 
     def test_macd_zero_line_zero_signal(self):
         """MACD line = 0, signal = 0."""
@@ -404,6 +396,5 @@ class TestFormatIndicatorsV2Full:
             "macd_signal": 0.0,
             "macd_histogram": 0.0,
         })
-        # 0 > 0 = False -> "sous le Signal", 0 > 0 = False -> "zone negative"
-        assert "MACD sous le Signal" in result
-        assert "zone negative" in result
+        assert "MACD below Signal" in result
+        assert "negative zone" in result

@@ -37,20 +37,21 @@ def extract_chart_structure(screenshot_path, symbol, timeframe) -> dict | None:
     img.save(buffer, format="JPEG", quality=85)
     image_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-    price_anchor = f"\nPRIX ACTUEL: {current_price:.5f}. Les niveaux de support/resistance DOIVENT etre dans un range de ±3% autour de ce prix ({current_price * 0.97:.5f} - {current_price * 1.03:.5f}). Tout niveau hors de ce range est invalide." if current_price else ""
+    price_anchor = f"\nCURRENT PRICE: {current_price:.5f}. Support/resistance levels MUST be within a range of ±3% around this price ({current_price * 0.97:.5f} - {current_price * 1.03:.5f}). Any level outside this range is invalid." if current_price else ""
 
-    prompt = f"""Analyse ce graphique de trading ({symbol}, timeframe={timeframe}) et extrait UNIQUEMENT les elements visuels. Ne donne PAS de decision de trading.{price_anchor}
+    prompt = f"""Analyze this trading chart ({symbol}, timeframe={timeframe}) and extract ONLY the visual elements. Do NOT make any trading decisions.{price_anchor}
 
-Reponds en JSON:
+Respond in JSON format:
 {{
-  "support_levels": [liste des prix de supports visibles en lisant l'axe Y du graphique],
-  "resistance_levels": [liste des prix de resistances visibles en lisant l'axe Y du graphique],
-  "trendlines": "description des lignes de tendance",
-  "chart_patterns": ["liste des patterns visibles: double top/bottom, head and shoulders, triangle, flag, wedge, channel"],
-  "candlestick_visual": "description des chandeliers recents visibles",
+  "support_levels": [list of support prices visible when reading the Y-axis of the chart],
+  "resistance_levels": [list of resistance prices visible when reading the Y-axis of the chart],
+  "trendlines": "description of the trendlines",
+  "chart_patterns": ["list of visible patterns: double top/bottom, head and shoulders, triangle, flag, wedge, channel"],
+  "candlestick_visual": "description of the recent visible candlesticks",
   "market_phase": "trending_up|trending_down|ranging|breakout|reversal",
-  "price_action_notes": "notes sur l'action du prix (rejets, meches, breakouts)"
-}}"""
+  "price_action_notes": "notes on the price action (rejections, wicks, breakouts)"
+}}
+Ensure all description fields are written in English."""
 
     try:
         response = client.chat.completions.create(
