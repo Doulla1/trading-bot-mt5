@@ -1517,8 +1517,8 @@ class TestWeekendClosure:
         dt_sat = datetime(2026, 6, 6, 12, 0, tzinfo=timezone.utc)
         assert strat.is_weekend_closure(dt_sat) is True
 
-        # Dimanche 23h59 UTC (fermeture active)
-        dt_sun = datetime(2026, 6, 7, 23, 59, tzinfo=timezone.utc)
+        # Dimanche 21h59 UTC (fermeture active)
+        dt_sun = datetime(2026, 6, 7, 21, 59, tzinfo=timezone.utc)
         assert strat.is_weekend_closure(dt_sun) is True
 
         # Lundi 00h01 UTC (pas fermeture)

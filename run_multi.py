@@ -281,6 +281,22 @@ def run_all() -> None:
                 continue
 
             try:
+                # 1. Gestion active et réconciliation de tous les symboles à chaque round
+                from src.config import settings
+                for cfg in SYMBOLS:
+                    sym = cfg["symbol"]
+                    tf = cfg["timeframe"]
+                    magic = cfg["magic"]
+                    
+                    # Surcharge temporaire des settings pour la gestion technique
+                    settings.trading_symbol = sym
+                    settings.trading_timeframe = tf
+                    settings.mt5_magic_number = magic
+                    
+                    manage_open_positions()
+                    _reconcile_closed_positions(sym)
+
+                # 2. Analyse IA complète pour les symboles dont la période est échue
                 for cfg in SYMBOLS:
                     if _should_run(cfg, round_num):
                         run_symbol(cfg)

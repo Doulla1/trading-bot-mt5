@@ -180,7 +180,7 @@ RULES FOR PLACING STOP LOSS (SL) AND TAKE PROFIT (TP):
   * SELL: Place the SL just above the last swing high (structural resistance) or above the top of the Ichimoku cloud (dynamic resistance).
 - The Take Profit (TP) MUST respect a minimum ratio and be placed realistically (securing gains):
   * The TP must be at least greater than 1.5x the Stop Loss (TP >= 1.5 * SL).
-  * SECURING GAINS: Place the TP intelligently relative to chart obstacles. For a BUY, place it 1 to 2 pips BELOW the last swing high (or below the Pivot R1/R2/R3 resistance or below the 24h High) to guarantee execution before a rejection. For a SELL, place it 1 to 2 pips ABOVE the last swing low (or above Pivot S1/S2/S3 support or above the 24h Low).
+  * SECURING GAINS: Place the TP intelligently relative to chart obstacles. For a BUY, place it 1 to 2 pips BELOW (or 20 to 30 pips for XAUUSD) the last swing high (or below the Pivot R1/R2/R3 resistance or below the 24h High) to guarantee execution before a rejection. For a SELL, place it 1 to 2 pips ABOVE (or 20 to 30 pips for XAUUSD) the last swing low (or above Pivot S1/S2/S3 support or above the 24h Low).
 
 EXISTING POSITIONS (conservative rule):
 - If you already have a position and signals confirm your direction -> HOLD (the position is good, trailing/breakeven will handle it).
