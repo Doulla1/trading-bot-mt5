@@ -135,10 +135,13 @@ def make_decision_fast(indicators, ocr_data, calendar_events, open_positions,
 
 def _validate_decision(decision: dict) -> bool:
     """Valide les champs et plages de la decision."""
-    required = ["action", "confidence", "reasoning", "stop_loss_pips", "take_profit_pips", "risk_level"]
+    required = [
+        "action", "confidence", "reasoning", "stop_loss_pips",
+        "take_profit_pips", "risk_level", "is_sl_tp_aligned_with_structure"
+    ]
     for field in required:
         if field not in decision:
-            logger.error(f"Champ manquant: {field}")
+            logger.error(f"Champ manquant dans la decision IA: {field}")
             return False
 
     if decision["action"] not in ("BUY", "SELL", "HOLD", "CLOSE"):

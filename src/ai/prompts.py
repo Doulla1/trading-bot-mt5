@@ -72,7 +72,18 @@ Analyze the chart and indicators. Consider economic events.
 If a position is already open, evaluate whether to hold or close it.
 
 Respond ONLY with a JSON object:
-{{"action": "BUY|SELL|HOLD|CLOSE", "confidence": 0-100, "reasoning": "...", "stop_loss_pips": int, "take_profit_pips": int, "risk_level": "LOW|MEDIUM|HIGH"}}
+{{
+  "reference_swing_high": float_or_null,
+  "reference_swing_low": float_or_null,
+  "is_sl_tp_aligned_with_structure": "YES|NO",
+  "action": "BUY|SELL|HOLD|CLOSE",
+  "confidence": 0-100,
+  "reasoning": "...",
+  "stop_loss_pips": int,
+  "take_profit_pips": int,
+  "risk_level": "LOW|MEDIUM|HIGH"
+}}
+- For reference_swing_high and reference_swing_low, specify the numeric values you are using as structural references. Use null if they are not clear or not applicable.
 - stop_loss_pips must be between {min_sl} and {max_sl} pips {note_sl}, take_profit_pips >= stop_loss_pips * 1.5
 - Write the 'reasoning' field entirely in French."""
 
@@ -189,7 +200,18 @@ EXISTING POSITIONS (conservative rule):
 - DO NOT suggest BUY/SELL if a position is already open (the bot will not open a second position).
 
 Respond ONLY in JSON format:
-{{"action": "BUY|SELL|HOLD|CLOSE", "confidence": 0-100, "reasoning": "analyse concise en français (max 200 mots)", "stop_loss_pips": int, "take_profit_pips": int, "risk_level": "LOW|MEDIUM|HIGH"}}
+{{
+  "reference_swing_high": float_or_null,
+  "reference_swing_low": float_or_null,
+  "is_sl_tp_aligned_with_structure": "YES|NO",
+  "action": "BUY|SELL|HOLD|CLOSE",
+  "confidence": 0-100,
+  "reasoning": "analyse concise en français (max 200 mots)",
+  "stop_loss_pips": int,
+  "take_profit_pips": int,
+  "risk_level": "LOW|MEDIUM|HIGH"
+}}
+- For reference_swing_high and reference_swing_low, use the numerical values you identified as support/resistance. Use null if undetermined.
 Ensure the 'reasoning' field is written entirely in French.""")
 
     return "\n".join(parts)

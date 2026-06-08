@@ -16,6 +16,7 @@ from src.mt5.executor import (
     get_open_positions, count_open_positions, TradeResult,
 )
 from src.data.database import get_db, log_trade_close
+from src.ai.prompts import SL_LIMITS_CONFIG
 
 # ============================================================
 # Configuration SL/TP par symbole basee sur l'ATR (v4.0)
@@ -192,7 +193,7 @@ def execute_decision(decision: dict) -> StrategyResult:
             )
             stop_loss_pips = cfg_floor["min_sl"]
             take_profit_pips = max(take_profit_pips, cfg_floor["min_tp"], int(stop_loss_pips * cfg_floor["tp_ratio"]))
-        volume = calculate_position_size(balance, stop_loss_pips, symbol_info)
+        # --- Python Guardrails: Structural SL/TP validation & adjustment ---
         point = symbol_info.get("point", 0.00001)
         digits = symbol_info.get("digits", 5)
 
@@ -203,10 +204,51 @@ def execute_decision(decision: dict) -> StrategyResult:
 
         if action == "BUY":
             entry = tick.ask
+        else:
+            entry = tick.bid
+
+        required_sl_pips = stop_loss_pips
+        structure = indicators.get("market_structure", {})
+
+        if action == "BUY":
+            swing_low = structure.get("last_swing_low")
+            if swing_low and isinstance(swing_low, (int, float)) and swing_low > 0:
+                dist_pips = (entry - swing_low) / (10 * point) + 2
+                if dist_pips > required_sl_pips:
+                    required_sl_pips = int(dist_pips)
+                    logger.info(f"[{sym}] Ajustement structurel SL (BUY): swing low a {swing_low}, SL pips requis: {required_sl_pips}")
+        elif action == "SELL":
+            swing_high = structure.get("last_swing_high")
+            if swing_high and isinstance(swing_high, (int, float)) and swing_high > 0:
+                dist_pips = (swing_high - entry) / (10 * point) + 2
+                if dist_pips > required_sl_pips:
+                    required_sl_pips = int(dist_pips)
+                    logger.info(f"[{sym}] Ajustement structurel SL (SELL): swing high a {swing_high}, SL pips requis: {required_sl_pips}")
+
+        # Validation par rapport au SL maximum autorise
+        sl_limits = SL_LIMITS_CONFIG.get(sym, {"min": 15, "max": 50})
+        max_allowed_sl = sl_limits.get("max", 50)
+
+        if required_sl_pips > max_allowed_sl:
+            logger.warning(
+                f"[{sym}] Le SL structurel requis ({required_sl_pips} pips) depasse la limite maximale autorisee "
+                f"({max_allowed_sl} pips) pour ce symbole. Trade annule pour preserver le ratio de risque."
+            )
+            return result
+
+        if required_sl_pips != stop_loss_pips:
+            stop_loss_pips = required_sl_pips
+            min_tp = int(stop_loss_pips * cfg_floor["tp_ratio"])
+            if take_profit_pips < min_tp:
+                logger.info(f"[{sym}] Ajustement TP a {min_tp} pips pour maintenir le ratio minimum (SL={stop_loss_pips})")
+                take_profit_pips = min_tp
+
+        volume = calculate_position_size(balance, stop_loss_pips, symbol_info)
+
+        if action == "BUY":
             sl_price = round(entry - (stop_loss_pips * 10 * point), digits)
             tp_price = round(entry + (take_profit_pips * 10 * point), digits)
         else:
-            entry = tick.bid
             sl_price = round(entry + (stop_loss_pips * 10 * point), digits)
             tp_price = round(entry - (take_profit_pips * 10 * point), digits)
 
