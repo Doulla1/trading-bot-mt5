@@ -182,6 +182,7 @@ General rules:
 - If a HIGH impact news event is approaching (<30 min) -> systematic HOLD.
 - If Ichimoku, pivots, and structure are in conflict -> HOLD.
 - If ADX < 20 (ranging) -> avoid trading, preference HOLD.
+- Avoid buying if Resistance R1 is closer to the entry price than your Stop Loss. Avoid selling if Support S1 is closer to the entry price than your Stop Loss (ensure sufficient room to move before hitting major obstacles).
 - Avoid opening a position just before HIGH impact news (the bot already blocks it, but be careful).
 
 RULES FOR PLACING STOP LOSS (SL) AND TAKE PROFIT (TP):

@@ -350,6 +350,28 @@ def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
             return False
     elif adx is not None and adx > 25:
         logger.debug(f"Filtres RSI/BB desactives: ADX={adx:.1f} > 25 (marche en tendance)")
+
+    # --- FILTRE D'ESPACE PIVOT (OBSTACLE ROOM CHECK) ---
+    entry = indicators.get("current_price")
+    sl_pips = decision.get("stop_loss_pips", 0)
+    point = symbol_info.get("point", 0.00001)
+
+    if action == "BUY" and entry and sl_pips:
+        r1 = indicators.get("pivot_r1")
+        if r1 and isinstance(r1, (int, float)) and r1 > entry:
+            dist_pips = (r1 - entry) / (10 * point)
+            if dist_pips < sl_pips:
+                logger.info(f"[{settings.trading_symbol}] Filtre Obstacle : BUY bloque (R1 a {dist_pips:.1f} pips < SL de {sl_pips} pips)")
+                return False
+
+    elif action == "SELL" and entry and sl_pips:
+        s1 = indicators.get("pivot_s1")
+        if s1 and isinstance(s1, (int, float)) and s1 < entry:
+            dist_pips = (entry - s1) / (10 * point)
+            if dist_pips < sl_pips:
+                logger.info(f"[{settings.trading_symbol}] Filtre Obstacle : SELL bloque (S1 a {dist_pips:.1f} pips < SL de {sl_pips} pips)")
+                return False
+
     return True
 
 
