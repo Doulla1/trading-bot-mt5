@@ -55,28 +55,71 @@ switch ($Action) {
     }
 
     "start" {
-        # Check if already running
-        $process = Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match $botScript}
-        if ($process) {
-            Write-Host "[!] Bot is already running in background (PID: $($process.ProcessId))." -ForegroundColor Yellow
+        # Check if already running using PID file
+        $pidFile = "$workDir\data\bot.pid"
+        $isRunning = $false
+        $oldPid = $null
+        if (Test-Path $pidFile) {
+            $oldPid = Get-Content $pidFile -Raw
+            if ($oldPid) {
+                $oldPid = $oldPid.Trim()
+                if ($oldPid -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {
+                    $isRunning = $true
+                }
+            }
+        }
+        
+        # Fallback to process search
+        if (-not $isRunning) {
+            $process = Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match $botScript}
+            if ($process) {
+                $oldPid = $process.ProcessId
+                $isRunning = $true
+                $oldPid | Out-File $pidFile -Force
+            }
+        }
+
+        if ($isRunning) {
+            Write-Host "[!] Bot is already running in background (PID: $oldPid)." -ForegroundColor Yellow
         } else {
             Write-Host "[+] Starting $botScript in background..." -ForegroundColor Green
-            # Start process in background with explicit working directory
-            $proc = Start-Process -FilePath "pythonw.exe" -ArgumentList $botScript -WorkingDirectory $workDir -WindowStyle Hidden -PassThru
+            # Start process in background with output redirection and absolute script path
+            $proc = Start-Process -FilePath "python.exe" -ArgumentList "$workDir\$botScript" -WorkingDirectory $workDir -WindowStyle Hidden -RedirectStandardOutput "$workDir\logs\bot_stdout.log" -RedirectStandardError "$workDir\logs\bot_stderr.log" -PassThru
+            $proc.Id | Out-File $pidFile -Force
             Write-Host "[+] Bot started successfully (PID: $($proc.Id))." -ForegroundColor Green
         }
     }
 
     "stop" {
+        $pidFile = "$workDir\data\bot.pid"
+        $stopped = $false
+        if (Test-Path $pidFile) {
+            $oldPid = Get-Content $pidFile -Raw
+            if ($oldPid) {
+                $oldPid = $oldPid.Trim()
+                if ($oldPid -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {
+                    Write-Host "[-] Stopping bot process (PID: $oldPid)..." -ForegroundColor Red
+                    Stop-Process -Id $oldPid -Force
+                    $stopped = $true
+                }
+            }
+            Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+        }
+
+        # Fallback to search
         $processes = Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match $botScript}
-        if (-not $processes) {
-            Write-Host "[-] No running bot process found ($botScript)." -ForegroundColor Cyan
-        } else {
+        if ($processes) {
             foreach ($p in $processes) {
                 Write-Host "[-] Stopping bot process (PID: $($p.ProcessId))..." -ForegroundColor Red
                 Stop-Process -Id $p.ProcessId -Force
-                Write-Host "[+] Stopped successfully." -ForegroundColor Green
+                $stopped = $true
             }
+        }
+
+        if ($stopped) {
+            Write-Host "[+] Stopped successfully." -ForegroundColor Green
+        } else {
+            Write-Host "[-] No running bot process found ($botScript)." -ForegroundColor Cyan
         }
     }
 
@@ -84,9 +127,31 @@ switch ($Action) {
         Write-Host "`n=== PROCESS STATUS ===`n" -ForegroundColor Cyan
         
         # Bot status
-        $botProcess = Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match $botScript}
+        $pidFile = "$workDir\data\bot.pid"
+        $botProcess = $null
+        $pidVal = ""
+        if (Test-Path $pidFile) {
+            $oldPid = Get-Content $pidFile -Raw
+            if ($oldPid) {
+                $oldPid = $oldPid.Trim()
+                if ($oldPid) {
+                    $botProcess = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
+                    if ($botProcess) { $pidVal = $botProcess.Id }
+                }
+            }
+        }
+        
+        # Fallback
+        if (-not $botProcess) {
+            $cimProcess = Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match $botScript}
+            if ($cimProcess) {
+                $botProcess = $cimProcess
+                $pidVal = $cimProcess.ProcessId
+            }
+        }
+
         if ($botProcess) {
-            Write-Host "Bot (run_multi.py):      [RUNNING] (PID: $($botProcess.ProcessId))" -ForegroundColor Green
+            Write-Host "Bot (run_multi.py):      [RUNNING] (PID: $pidVal)" -ForegroundColor Green
         } else {
             Write-Host "Bot (run_multi.py):      [STOPPED]" -ForegroundColor Red
         }
@@ -94,7 +159,10 @@ switch ($Action) {
         # Dashboard status
         $dashProcess = Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match $dashboardScript}
         if ($dashProcess) {
-            Write-Host "Dashboard (dashboard.py):  [RUNNING] (PID: $($dashProcess.ProcessId))" -ForegroundColor Green
+            # Handle list if multiple dashboard processes exist
+            $dp = $dashProcess | Select-Object -First 1
+            $dPid = if ($dp.ProcessId) { $dp.ProcessId } else { $dp.Id }
+            Write-Host "Dashboard (dashboard.py):  [RUNNING] (PID: $dPid)" -ForegroundColor Green
         } else {
             Write-Host "Dashboard (dashboard.py):  [STOPPED]" -ForegroundColor Red
         }
