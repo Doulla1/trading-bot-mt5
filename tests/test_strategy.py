@@ -1366,7 +1366,40 @@ class TestATRSLHardFloor:
 
         # ATR based: max(15, 20*1.5=30) = 30
         # SL final: max(25, 30) = 30
-        # TP final: max(50, min_tp=30, 30*2=60) = 60
+        # TP final: since DeepSeek TP (50) >= 1.5 * SL (45), we keep DeepSeek TP = 50.
+        assert sl == 30
+        assert tp == 50
+
+    def test_flexible_tp_keeps_deepseek_tp_when_above_1_5r(self):
+        """DeepSeek TP >= 1.5 * SL -> on garde DeepSeek TP."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        indicators = {"atr_14": 0.00200}  # ~20 pips pour EURUSD
+        sym_info = MagicMock()
+        sym_info.point = 0.00001
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            # SL final = 30, 1.5 * SL = 45. DeepSeek TP = 46. On s'attend a TP = 46.
+            sl, tp = strat._get_atr_based_sl_tp("EURUSD", indicators, deepseek_sl=25, deepseek_tp=46)
+
+        assert sl == 30
+        assert tp == 46
+
+    def test_flexible_tp_adjusts_to_target_when_below_1_5r(self):
+        """DeepSeek TP < 1.5 * SL -> on force le ratio cible de la config (2.0R)."""
+        import src.ai.strategy as strat
+        from unittest.mock import patch
+
+        indicators = {"atr_14": 0.00200}  # ~20 pips pour EURUSD
+        sym_info = MagicMock()
+        sym_info.point = 0.00001
+
+        with patch("src.ai.strategy.mt5.symbol_info", return_value=sym_info):
+            # SL final = 30, 1.5 * SL = 45. DeepSeek TP = 40 (< 45).
+            # On force le ratio de config (2.0 * 30 = 60).
+            sl, tp = strat._get_atr_based_sl_tp("EURUSD", indicators, deepseek_sl=25, deepseek_tp=40)
+
         assert sl == 30
         assert tp == 60
 

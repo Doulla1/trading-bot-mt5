@@ -63,8 +63,10 @@ def _atr_to_pips(atr_value: float, point: float) -> float:
 def _get_atr_based_sl_tp(symbol: str, indicators: dict, deepseek_sl: int, deepseek_tp: int) -> tuple[int, int]:
     """Calcule le SL et TP bases sur l'ATR, en respectant les minimums par symbole.
 
-    Retourne (sl_pips, tp_pips). Utilise toujours max(deepseek, atr_based)
-    pour que DeepSeek puisse elargir mais jamais reduire en dessous du minimum ATR."""
+    Retourne (sl_pips, tp_pips).
+    Si le TP propose par DeepSeek respecte le ratio de securite de 1.5 * SL,
+    on le conserve pour respecter les obstacles techniques (ex: Pivot R3/S3),
+    plutot que de forcer le ratio cible rigide de 2.0."""
     cfg = _ATR_SL_CONFIG.get(symbol, _ATR_SL_CONFIG["EURUSD"])
     atr_value = indicators.get("atr_14") if indicators else None
     sym_info = mt5.symbol_info(symbol)
@@ -76,13 +78,21 @@ def _get_atr_based_sl_tp(symbol: str, indicators: dict, deepseek_sl: int, deepse
     # SL final: le plus large entre DeepSeek et ATR
     sl_final = max(deepseek_sl, atr_based_sl)
 
-    # TP final: max(deepseek_tp, sl_final * tp_ratio, min_tp)
-    tp_min = max(cfg["min_tp"], int(sl_final * cfg["tp_ratio"]))
-    tp_final = max(deepseek_tp, tp_min)
+    # TP final:
+    # 1) Calculer le TP minimum absolu base sur le ratio de securite minimum (1.5R)
+    min_tp_absolute = int(sl_final * 1.5)
+
+    # 2) Si le TP de DeepSeek est >= 1.5R, on le conserve pour preserver les niveaux techniques,
+    # sinon on applique le ratio cible de la config (ex: 2.0) ou au moins le min_tp.
+    if deepseek_tp >= min_tp_absolute:
+        tp_final = deepseek_tp
+    else:
+        tp_target = max(cfg["min_tp"], int(sl_final * cfg["tp_ratio"]))
+        tp_final = max(deepseek_tp, tp_target)
 
     if sl_final != deepseek_sl or tp_final != deepseek_tp:
         logger.info(
-            f"SL/TP ajustes ATR pour {symbol}: DeepSeek SL={deepseek_sl}/TP={deepseek_tp} -> "
+            f"SL/TP limites ATR pour {symbol}: DeepSeek SL={deepseek_sl}/TP={deepseek_tp} -> "
             f"ATR SL={sl_final}/TP={tp_final} (ATR={atr_pips:.0f} pips, min_sl={cfg['min_sl']})"
         )
 
@@ -238,9 +248,11 @@ def execute_decision(decision: dict) -> StrategyResult:
 
         if required_sl_pips != stop_loss_pips:
             stop_loss_pips = required_sl_pips
-            min_tp = int(stop_loss_pips * cfg_floor["tp_ratio"])
+            # Pour l'ajustement du SL structurel, on impose le ratio de securite minimum de 1.5R 
+            # plutot que le ratio cible de 2.0 de la config afin de laisser le TP le plus proche et atteignable possible.
+            min_tp = int(stop_loss_pips * 1.5)
             if take_profit_pips < min_tp:
-                logger.info(f"[{sym}] Ajustement TP a {min_tp} pips pour maintenir le ratio minimum (SL={stop_loss_pips})")
+                logger.info(f"[{sym}] Ajustement TP a {min_tp} pips pour maintenir le ratio minimum de 1.5 (SL={stop_loss_pips})")
                 take_profit_pips = min_tp
 
         volume = calculate_position_size(balance, stop_loss_pips, symbol_info)
