@@ -64,22 +64,64 @@ def fetch_events() -> list[dict]:
     return events
 
 
+def enrich_event_with_delay(ev: dict, now_utc: datetime) -> dict:
+    """Ajoute le delai en minutes avant l'evenement et formate la date.
+
+    Aussi s'assure que la cle 'date' est toujours presente.
+    """
+    ev = dict(ev)  # Copie pour eviter les effets de bord
+    
+    # Assurer la presence de la cle 'date'
+    if "date" not in ev:
+        ev["date"] = now_utc.strftime("%Y-%m-%d")
+        
+    time_str = ev.get("time", "")
+    if not time_str or time_str == "All day":
+        ev["minutes_to_event"] = None
+        return ev
+        
+    try:
+        parts = time_str.split(":")
+        hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
+        
+        # Analyser la date
+        ev_date_str = ev["date"]
+        # Format attendu: "YYYY-MM-DD"
+        event_dt = datetime.strptime(f"{ev_date_str} {hour:02d}:{minute:02d}", "%Y-%m-%d %H:%M").replace(tzinfo=None)
+        now_naive = now_utc.replace(tzinfo=None)
+        
+        minutes_to_event = int((event_dt - now_naive).total_seconds() / 60)
+        ev["minutes_to_event"] = minutes_to_event
+    except Exception as e:
+        logger.warning("Impossible de calculer le delai pour l'evenement {}: {}", ev.get("event"), e)
+        ev["minutes_to_event"] = None
+        
+    return ev
+
+
 def filter_relevant_events(events: list[dict], symbol: str = "EURUSD") -> list[dict]:
     """Filtre les evenements par devise du symbole et importance HIGH/MEDIUM.
+
+    Ajoute programmatiquement le delai en minutes avant chaque evenement (minutes_to_event).
 
     Args:
         events: Liste d'evenements bruts.
         symbol: Paire forex (ex: "EURUSD", "GBPJPY").
 
     Retourne:
-        Evenements pertinents pour la paire.
+        Evenements pertinents pour la paire, enrichis.
     """
     currencies = {symbol[:3], symbol[3:]}
-    return [
+    now_utc = datetime.now(timezone.utc)
+    
+    filtered = [
         ev for ev in events
         if ev.get("impact") in ("high", "medium")
         and ev.get("currency") in currencies
     ]
+    
+    return [enrich_event_with_delay(ev, now_utc) for ev in filtered]
 
 
 # ===================================================================

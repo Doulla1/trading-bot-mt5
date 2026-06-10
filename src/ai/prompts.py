@@ -482,8 +482,31 @@ def _format_calendar(events: list) -> str:
         impact = "HIGH" if ev.get("impact") == "high" else "MED" if ev.get("impact") == "medium" else "LOW"
         date_info = ev.get("date", "")
         time_info = ev.get("time", "")
+        
+        # Add delay info if available
+        delay_info = ""
+        mins = ev.get("minutes_to_event")
+        if mins is not None:
+            if mins > 0:
+                hours = mins // 60
+                rem_mins = mins % 60
+                if hours > 0:
+                    delay_info = f" (in {hours}h {rem_mins}m / {mins} mins)"
+                else:
+                    delay_info = f" (in {mins} mins)"
+            elif mins < 0:
+                abs_mins = abs(mins)
+                hours = abs_mins // 60
+                rem_mins = abs_mins % 60
+                if hours > 0:
+                    delay_info = f" ({hours}h {rem_mins}m ago / {mins} mins ago)"
+                else:
+                    delay_info = f" ({abs_mins} mins ago)"
+            else:
+                delay_info = " (NOW)"
+                
         lines.append(
-            f"- [{impact}] {date_info} {time_info} | {ev.get('currency', '')} | "
+            f"- [{impact}] {date_info} {time_info}{delay_info} | {ev.get('currency', '')} | "
             f"{ev.get('event', '')}"
         )
     return "\n".join(lines)
