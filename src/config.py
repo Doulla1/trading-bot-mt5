@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     # Modele utilise pour la decision principale
     ai_model: str = "deepseek-v4-pro"
+    # Nombre maximum de tokens pour la reponse (completion)
+    ai_max_tokens: int = 8192
     # Modele utilise pour les cycles de confirmation (plus rapide/leger)
     ai_fast_model: str = "deepseek-v4-flash"
     # URL de base de l'API (change selon le fournisseur)

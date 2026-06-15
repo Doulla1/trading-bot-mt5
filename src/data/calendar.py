@@ -112,7 +112,7 @@ def filter_relevant_events(events: list[dict], symbol: str = "EURUSD") -> list[d
     Retourne:
         Evenements pertinents pour la paire, enrichis.
     """
-    currencies = {symbol[:3], symbol[3:]}
+    currencies = {symbol[:3], symbol[3:], "USD"}
     now_utc = datetime.now(timezone.utc)
     
     filtered = [

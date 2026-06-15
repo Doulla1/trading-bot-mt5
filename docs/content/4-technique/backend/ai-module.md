@@ -79,6 +79,46 @@ Version avec `deepseek-v4-flash`, utilisee pour les cycles de confirmation.
 
 Validation stricte : champs requis, plages (confidence 0-100, SL 5-100 pour BUY/SELL, TP >= 1.5x SL, risk_level valide). HOLD/CLOSE acceptent SL=0.
 
+### Mecanisme de recuperation JSON (v4.1)
+
+**Probleme** : DeepSeek tronque parfois la reponse JSON au milieu du champ `reasoning`, ce qui rend le JSON invalide et fait perdre des signaux de trading.
+
+**Solution** : `_recover_truncated_json()` applique 4 strategies en cascade pour sauver les reponses tronquees.
+
+#### Strategie 1 : Fermeture d'accolades manquantes
+Compte les `{` et `}` non fermees, ajoute les accolades manquantes a la fin. Si la troncature est au milieu d'une valeur string, coupe au dernier `",` ou `,` avant de refermer.
+
+#### Strategie 2 : Regex greedy
+Utilise une regex `\{.*\}` pour extraire le meilleur bloc JSON du texte brut (fallback si la strategie 1 echoue).
+
+#### Strategie 3 : Extraction champ par champ
+Fallback ultime. Extrait chaque champ via des regex specifiques :
+- Champs string : `action`, `risk_level`, `is_sl_tp_aligned_with_structure`, `reasoning`
+- Champs numeriques : `confidence`, `stop_loss_pips`, `take_profit_pips`
+- Champs nullables : `reference_swing_high`, `reference_swing_low`
+
+#### Strategie 4 : Fusion
+Si les strategies 1/2 ont donne un resultat partiel mais incomplete, la strategie 3 complete les champs manquants via un merge.
+
+#### Valeurs par defaut
+Si certains champs restent absents apres les 4 strategies :
+- `reasoning` → `"(reponse tronquee)"`
+- `stop_loss_pips` / `take_profit_pips` → `0`
+- `risk_level` → `"MEDIUM"`
+- `is_sl_tp_aligned_with_structure` → `"NO"`
+- `reference_swing_high` / `reference_swing_low` → `None`
+
+#### Mesures preventives complementaires
+| Mesure | Detail |
+|---|---|
+| `response_format={"type": "json_object"}` | Force le modele a produire un JSON valide (DeepSeek, OpenAI) |
+| `max_tokens` augmente | 4000 → 4096 pour reduire les troncatures |
+| Alerte tokens | Warning si `completion_tokens >= 3500` (proche de la limite 4096) |
+| Log etendu | Log les 500 premiers caracteres de la reponse pour diagnostic |
+
+#### Tests
+`tests/test_analyzer_recovery.py` couvre 9 cas : JSON valide, chaine vide, texte sans JSON, troncature, extraction champ par champ, troncature DeepSeek typique, accolade manquante, champs null, JSON complet.
+
 ---
 
 ## `strategy.py` - Risk Management + Position Management

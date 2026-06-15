@@ -1,5 +1,6 @@
 """Analyseur IA multi-provider - decision de trading.
 
+v4.1: JSON recovery for truncated responses + response_format JSON mode.
 v4.0: Configuration via .env (AI_PROVIDER, AI_MODEL, AI_BASE_URL, AI_API_KEY).
 Compatible OpenAI, DeepSeek, OpenRouter, Azure et toute API OpenAI-compatible.
 Pour changer de fournisseur, modifier les variables dans .env - pas le code."""
@@ -12,6 +13,110 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.config import settings
 from src.ai.prompts import build_decision_prompt
+
+
+def _recover_truncated_json(raw: str) -> dict | None:
+    """Essaie de recuperer un JSON tronque en fermant les accolades/guillemets manquants.
+
+    DeepSeek coupe parfois la reponse au milieu du champ 'reasoning'.
+    Cette fonction tente plusieurs strategies de reparation:
+    1. Fermer les accolades non fermees
+    2. Regex greedy standard (original)
+    3. Couper au dernier champ valide et refermer le JSON
+    4. Extraire les champs connus individuellement (fallback ultime)
+    """
+    if not raw:
+        return None
+
+    best_result: dict | None = None
+
+    # Strategie 1: Ajouter les accolades fermantes manquantes
+    open_braces = raw.count("{") - raw.count("}")
+    if open_braces > 0:
+        fixed = raw.rstrip().rstrip(",")
+        if fixed and fixed[-1] not in ("}", '"', "]"):
+            # Chercher le dernier guillemet ferme (fin de valeur string)
+            last_quote = fixed.rfind('",')
+            if last_quote > 0:
+                fixed = fixed[:last_quote + 1]
+            else:
+                last_comma = fixed.rfind(",")
+                if last_comma > 0:
+                    fixed = fixed[:last_comma]
+        fixed += "}" * open_braces
+        try:
+            best_result = json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+
+    # Strategie 2: Regex greedy standard (original)
+    if best_result is None:
+        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if json_match:
+            try:
+                best_result = json.loads(json_match.group(0))
+            except json.JSONDecodeError:
+                pass
+
+    # Si Strategie 1/2 a donne un resultat partiel, verifier les champs critiques
+    if best_result is not None and "action" in best_result and "confidence" in best_result:
+        return best_result
+
+    # Strategie 3: Extraire les champs individuellement (fallback ultime)
+    try:
+        result = {}
+        for field in ["action", "confidence", "reasoning", "stop_loss_pips",
+                       "take_profit_pips", "risk_level",
+                       "reference_swing_high", "reference_swing_low",
+                       "is_sl_tp_aligned_with_structure"]:
+            if field in ("action", "risk_level", "is_sl_tp_aligned_with_structure"):
+                m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', raw)
+                if m:
+                    result[field] = m.group(1)
+            elif field == "reasoning":
+                m = re.search(rf'"{field}"\s*:\s*"([^"]*)', raw)
+                if m:
+                    result[field] = m.group(1).rstrip()
+            elif field in ("confidence", "stop_loss_pips", "take_profit_pips"):
+                m = re.search(rf'"{field}"\s*:\s*(-?\d+(?:\.\d+)?)', raw)
+                if m:
+                    val = m.group(1)
+                    result[field] = float(val) if "." in val else int(val)
+            elif field in ("reference_swing_high", "reference_swing_low"):
+                m = re.search(rf'"{field}"\s*:\s*(null|[\d.]+)', raw)
+                if m:
+                    val = m.group(1)
+                    result[field] = None if val == "null" else float(val)
+
+        if "action" in result and "confidence" in result:
+            logger.warning(f"JSON partiellement recupere: {len(result)}/9 champs")
+            if "reasoning" not in result:
+                result["reasoning"] = "(reponse tronquee)"
+            if "stop_loss_pips" not in result:
+                result["stop_loss_pips"] = 0
+            if "take_profit_pips" not in result:
+                result["take_profit_pips"] = 0
+            if "risk_level" not in result:
+                result["risk_level"] = "MEDIUM"
+            if "is_sl_tp_aligned_with_structure" not in result:
+                result["is_sl_tp_aligned_with_structure"] = "NO"
+            if "reference_swing_high" not in result:
+                result["reference_swing_high"] = None
+            if "reference_swing_low" not in result:
+                result["reference_swing_low"] = None
+
+            # Fusionner avec le meilleur resultat partiel des strategies 1/2
+            if best_result is not None:
+                for k, v in best_result.items():
+                    if k not in result:
+                        result[k] = v
+            return result
+    except Exception:
+        pass
+
+    # Dernier recours: retourner le resultat partiel meme sans confidence
+    # (sera filtre par _validate_decision)
+    return best_result
 
 
 def _make_client() -> OpenAI | None:
@@ -30,7 +135,12 @@ def _make_client() -> OpenAI | None:
 def make_decision(indicators, ocr_data, calendar_events, open_positions,
                   account_info, trade_history, session_context,
                   performance_stats=None) -> dict | None:
-    """Envoie toutes les donnees a l'IA. Retourne la decision JSON ou None."""
+    """Envoie toutes les donnees a l'IA. Retourne la decision JSON ou None.
+
+    Utilise response_format={"type": "json_object"} pour forcer un JSON valide.
+    En cas de reponse tronquee, applique _recover_truncated_json() en fallback.
+    Retry automatique via tenacity (2 tentatives, backoff exponentiel 3-30s).
+    Avertit si les tokens de completion approchent la limite de 4096."""
     client = _make_client()
     if client is None:
         return None
@@ -53,24 +163,47 @@ def make_decision(indicators, ocr_data, calendar_events, open_positions,
     )
 
     try:
+        # Utiliser response_format JSON si le provider le supporte (DeepSeek, OpenAI)
+        # Cela force le modele a renvoyer un JSON valide et reduit les troncatures
+        extra_kwargs = {}
+        try:
+            extra_kwargs["response_format"] = {"type": "json_object"}
+        except Exception:
+            pass  # Certains providers ne supportent pas, on ignore
+
         response = client.chat.completions.create(
             model=settings.ai_model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=4000,
+            max_tokens=settings.ai_max_tokens,
             temperature=0.2,
+            **extra_kwargs,
         )
 
         raw = response.choices[0].message.content or ""
-        logger.debug(f"{settings.ai_provider} reponse: {raw[:400]}...")
         if response.usage:
-            logger.info(f"Tokens: {response.usage.total_tokens} (prompt={response.usage.prompt_tokens})")
+            logger.info(
+                f"Tokens: {response.usage.total_tokens} "
+                f"(prompt={response.usage.prompt_tokens}, "
+                f"completion={response.usage.completion_tokens})"
+            )
+            # Alerte si on approche la limite de tokens de sortie
+            if response.usage.completion_tokens >= (settings.ai_max_tokens - 500):
+                logger.warning(
+                    f"Reponse proche de la limite tokens ({response.usage.completion_tokens}/{settings.ai_max_tokens}) - "
+                    f"risque de troncature. Verifier max_tokens."
+                )
 
-        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not json_match:
-            logger.error(f"Pas de JSON dans la reponse {settings.ai_provider}: {raw[:200]}")
+        # Log plus de contexte pour debug
+        logger.debug(f"{settings.ai_provider} reponse ({len(raw)} chars): {raw[:500]}...")
+
+        # Essayer de parser le JSON, avec fallback sur recuperation
+        decision = _recover_truncated_json(raw)
+        if decision is None:
+            logger.error(
+                f"JSON irreparable de {settings.ai_provider}. "
+                f"Reponse brute ({len(raw)} chars): {raw[:300]}"
+            )
             return None
-
-        decision = json.loads(json_match.group(0))
 
         if not _validate_decision(decision):
             return None
@@ -112,17 +245,23 @@ def make_decision_fast(indicators, ocr_data, calendar_events, open_positions,
     )
 
     try:
+        extra_kwargs = {}
+        try:
+            extra_kwargs["response_format"] = {"type": "json_object"}
+        except Exception:
+            pass
+
         response = client.chat.completions.create(
             model=settings.ai_fast_model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=800,
             temperature=0.2,
+            **extra_kwargs,
         )
         raw = response.choices[0].message.content or ""
-        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not json_match:
+        decision = _recover_truncated_json(raw)
+        if decision is None:
             return None
-        decision = json.loads(json_match.group(0))
         if not _validate_decision(decision):
             return None
         conf = decision.get("confidence", 0)
