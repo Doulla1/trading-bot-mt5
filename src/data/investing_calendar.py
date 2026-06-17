@@ -111,11 +111,11 @@ def _convert_event_times_to_utc(events: list[dict]) -> list[dict]:
             continue
 
         # 2) Heure absolue: "08:30" (en GMT+2)
-        parts = raw_time.split(":")
-        if len(parts) == 2:
+        time_match = re.search(r"(\d{1,2}):(\d{2})", raw_time)
+        if time_match:
             try:
-                hour = int(parts[0])
-                minute = int(parts[1])
+                hour = int(time_match.group(1))
+                minute = int(time_match.group(2))
                 # Construire l'heure GMT+2 aujourd'hui
                 event_gmt2 = now_gmt2.replace(
                     hour=hour, minute=minute, second=0, microsecond=0,

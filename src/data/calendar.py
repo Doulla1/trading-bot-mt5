@@ -81,9 +81,14 @@ def enrich_event_with_delay(ev: dict, now_utc: datetime) -> dict:
         return ev
         
     try:
-        parts = time_str.split(":")
-        hour = int(parts[0])
-        minute = int(parts[1]) if len(parts) > 1 else 0
+        import re
+        time_match = re.search(r"(\d{1,2}):(\d{2})", time_str)
+        if not time_match:
+            ev["minutes_to_event"] = None
+            return ev
+            
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2))
         
         # Analyser la date
         ev_date_str = ev["date"]
