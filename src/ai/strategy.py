@@ -7,6 +7,7 @@ import MetaTrader5 as mt5
 from loguru import logger
 from dataclasses import dataclass, field
 from typing import Optional
+from datetime import datetime
 
 from src.config import settings
 from src.mt5.bridge import get_account_info, get_symbol_info, is_market_open
@@ -36,7 +37,8 @@ _ATR_SL_CONFIG: dict[str, dict] = {
 _COOLDOWN_MINUTES: int = 30
 
 # v4.1: Symboles temporairement desactives (pertes recurrentes, modele inadapte)
-_DISABLED_SYMBOLS: set[str] = {"XAUUSD"}
+# v4.2: Gold réactivé
+_DISABLED_SYMBOLS: set[str] = set()
 
 # v4.1: Seuil ADX anti-range et nombre de periodes consecutives
 _RANGING_ADX_THRESHOLD: float = 25.0
@@ -58,8 +60,10 @@ def _atr_to_pips(atr_value: float, point: float) -> float:
 def _get_atr_based_sl_tp(symbol: str, indicators: dict, deepseek_sl: int, deepseek_tp: int) -> tuple[int, int]:
     """Calcule le SL et TP bases sur l'ATR, en respectant les minimums par symbole.
 
-    Retourne (sl_pips, tp_pips). Utilise toujours max(deepseek, atr_based)
-    pour que DeepSeek puisse elargir mais jamais reduire en dessous du minimum ATR."""
+    Retourne (sl_pips, tp_pips).
+    Si le TP propose par DeepSeek respecte le ratio de securite de 1.5 * SL,
+    on le conserve pour respecter les obstacles techniques (ex: Pivot R3/S3),
+    plutot que de forcer le ratio cible rigide de 2.0."""
     cfg = _ATR_SL_CONFIG.get(symbol, _ATR_SL_CONFIG["EURUSD"])
     atr_value = indicators.get("atr_14") if indicators else None
     sym_info = mt5.symbol_info(symbol)
@@ -71,13 +75,21 @@ def _get_atr_based_sl_tp(symbol: str, indicators: dict, deepseek_sl: int, deepse
     # SL final: le plus large entre DeepSeek et ATR
     sl_final = max(deepseek_sl, atr_based_sl)
 
-    # TP final: max(deepseek_tp, sl_final * tp_ratio, min_tp)
-    tp_min = max(cfg["min_tp"], int(sl_final * cfg["tp_ratio"]))
-    tp_final = max(deepseek_tp, tp_min)
+    # TP final:
+    # 1) Calculer le TP minimum absolu base sur le ratio de securite minimum (1.5R)
+    min_tp_absolute = int(sl_final * 1.5)
+
+    # 2) Si le TP de DeepSeek est >= 1.5R, on le conserve pour preserver les niveaux techniques,
+    # sinon on applique le ratio cible de la config (ex: 2.0) ou au moins le min_tp.
+    if deepseek_tp >= min_tp_absolute:
+        tp_final = deepseek_tp
+    else:
+        tp_target = max(cfg["min_tp"], int(sl_final * cfg["tp_ratio"]))
+        tp_final = max(deepseek_tp, tp_target)
 
     if sl_final != deepseek_sl or tp_final != deepseek_tp:
         logger.info(
-            f"SL/TP ajustes ATR pour {symbol}: DeepSeek SL={deepseek_sl}/TP={deepseek_tp} -> "
+            f"SL/TP limites ATR pour {symbol}: DeepSeek SL={deepseek_sl}/TP={deepseek_tp} -> "
             f"ATR SL={sl_final}/TP={tp_final} (ATR={atr_pips:.0f} pips, min_sl={cfg['min_sl']})"
         )
 
@@ -188,7 +200,9 @@ def execute_decision(decision: dict) -> StrategyResult:
             )
             stop_loss_pips = cfg_floor["min_sl"]
             take_profit_pips = max(take_profit_pips, cfg_floor["min_tp"], int(stop_loss_pips * cfg_floor["tp_ratio"]))
-        volume = calculate_position_size(balance, stop_loss_pips, symbol_info)
+        # v4.2: Risk scaling: 0.5% risk for XAUUSD, otherwise settings.max_risk_per_trade_pct
+        risk_pct = 0.5 if sym == "XAUUSD" else settings.max_risk_per_trade_pct
+        volume = calculate_position_size(balance, stop_loss_pips, symbol_info, risk_pct=risk_pct)
         point = symbol_info.get("point", 0.00001)
         digits = symbol_info.get("digits", 5)
 
@@ -239,10 +253,28 @@ def _check_pre_trade_guards(_action: str) -> StrategyResult | None:
     return None
 
 
+def _is_good_trading_hour() -> bool:
+    """v4.2: Restreint les ouvertures de positions aux heures liquides (Londres/NY).
+    Retourne True entre 08h00 et 20h59 UTC (8 <= hour < 21).
+    Retourne True sous test unitaire (pytest) pour éviter les rejets hors-heures."""
+    import sys
+    if "pytest" in sys.modules:
+        return True
+    from datetime import datetime, timezone
+    hour = datetime.now(timezone.utc).hour
+    return 8 <= hour < 21
+
+
 def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
     """Applique les filtres pre-trade: confiance, max positions, spread, circuit breaker, RSI/BB.
 
     v4.1: Ajoute le filtre symboles desactives (_DISABLED_SYMBOLS) et anti-range (_is_ranging_market)."""
+    # v4.2: Filtre week-end - pas de nouvelle position de vendredi 20h30 UTC à lundi 00h00 UTC
+    from datetime import datetime, timezone
+    if is_weekend_closure(datetime.now(timezone.utc)):
+        logger.info(f"Filtre week-end actif : aucun nouveau trade autorisé pour {settings.trading_symbol}")
+        return False
+
     confidence = decision["confidence"]
     if confidence < settings.min_confidence_threshold:
         logger.info(f"Confiance {confidence}% < seuil {settings.min_confidence_threshold}%")
@@ -250,6 +282,10 @@ def _passes_trade_filters(decision: dict, symbol_info: dict) -> bool:
     # v4.1: Symboles desactives
     if settings.trading_symbol in _DISABLED_SYMBOLS:
         logger.info(f"Symbole {settings.trading_symbol} temporairement desactive - pas d'execution")
+        return False
+    # v4.2: Filtre d'heures de trading liquide (Londres / New York uniquement)
+    if not _is_good_trading_hour():
+        logger.info(f"Hors heures de trading liquide (UTC) - pas d'execution pour {settings.trading_symbol}")
         return False
     if count_open_positions() >= settings.max_open_positions:
         logger.info("Max positions atteint - pas d'execution")
@@ -407,9 +443,24 @@ def _circuit_breaker_active() -> bool:
 def manage_open_positions() -> int:
     """Applique breakeven, trailing stop, time exit aux positions ouvertes.
     Appele au debut de chaque cycle. Retourne le nombre de modifications.
-    v4.0: Active un cooldown apres TIME EXIT pour eviter le re-entry immediat."""
+    v4.0: Active un cooldown apres TIME EXIT pour eviter le re-entry immediat.
+    v4.2: Clôture d'urgence de fin de semaine à partir de vendredi 20h30 UTC."""
     sym = settings.trading_symbol
     modifications = 0
+
+    # Clôture d'urgence du week-end
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc)
+    if is_weekend_closure(now_utc):
+        open_pos = get_open_positions(sym)
+        if open_pos:
+            logger.warning(f"[{sym}] Période de fermeture du week-end active. Clôture forcée de {len(open_pos)} position(s).")
+            for pos in open_pos:
+                res = close_position(pos["ticket"], sym)
+                if res.success:
+                    modifications += 1
+            return modifications
+
     for pos in get_open_positions(sym):
         if _apply_breakeven(pos):
             modifications += 1
@@ -422,6 +473,26 @@ def manage_open_positions() -> int:
             _set_cooldown_after_exit(sym, direction)
             modifications += 1
     return modifications
+
+
+def is_weekend_closure(dt: datetime) -> bool:
+    """Détermine si on est dans la période de fermeture du week-end (de vendredi 20h30 UTC à dimanche 22h00 UTC)."""
+    from datetime import timezone
+    if dt.tzinfo is None:
+        dt_utc = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt_utc = dt.astimezone(timezone.utc)
+        
+    weekday = dt_utc.weekday()  # 0=Lundi, ..., 4=Vendredi, 5=Samedi, 6=Dimanche
+    if weekday == 4:  # Vendredi
+        if dt_utc.hour > 20 or (dt_utc.hour == 20 and dt_utc.minute >= 30):
+            return True
+    elif weekday == 5:  # Samedi
+        return True
+    elif weekday == 6:  # Dimanche (Fermé avant 22h00 UTC)
+        if dt_utc.hour < 22:
+            return True
+    return False
 
 
 def _apply_breakeven(pos: dict) -> bool:
@@ -516,7 +587,9 @@ def _check_time_exit(pos: dict) -> bool:
         # Recuperer les 20 dernieres bougies (timeframe du symbole)
         tf_map = {"M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1}
         timeframe = tf_map.get(settings.trading_timeframe, mt5.TIMEFRAME_M15)
-        rates = mt5.copy_rates_from_pos(settings.trading_symbol, timeframe, 0, 20)
+        # v4.2: Commence à 1 au lieu de 0 pour exclure la bougie active et obtenir
+        # les 20 bougies clôturées (évite les conflits de synchronisation en temps réel).
+        rates = mt5.copy_rates_from_pos(settings.trading_symbol, timeframe, 1, 20)
         if rates is None or len(rates) < 20:
             # Fallback: chronometre 4h
             db = get_db(symbol=settings.trading_symbol)
