@@ -147,13 +147,6 @@ def run_once() -> None:
         # 1. Reconciliation des trades fermes par SL/TP
         reconcile_closed_positions(sym)
 
-        # v4.2: Suspendre le trading si on est en fermeture de week-end (après vendredi 20h30 UTC)
-        from datetime import timezone
-        from src.ai.strategy import is_weekend_closure
-        if is_weekend_closure(datetime.now(timezone.utc)):
-            logger.info(f"[{sym}] Période de fermeture du week-end active (après vendredi 20h30 UTC). Nouvelle analyse suspendue.")
-            return
-
         if not bridge.is_market_open():
             logger.info(f"Marche ferme pour {sym} - pas d'analyse")
             return
@@ -161,20 +154,7 @@ def run_once() -> None:
         # 2. Indicateurs multi-TF v2.0
         df_m15 = bridge.get_rates(sym, "M15", count=200)
         df_h1 = bridge.get_rates(sym, "H1", count=100)
-        df_h4 = bridge.get_rates(sym, "H4", count=50)
-        df_d1 = bridge.get_rates(sym, "D1", count=2)
-        
-        # Recupere le spread en pips
-        symbol_info = bridge.get_symbol_info(sym)
-        spread = None
-        if symbol_info:
-            spread_points = symbol_info.get("spread", 0)
-            if symbol_info.get("digits", 5) in [3, 5]:
-                spread = spread_points / 10.0
-            else:
-                spread = float(spread_points)
-                
-        indicators_data = indicators.compute_all(df_m15, df_h1, df_h4, df_d1=df_d1, spread=spread)
+        indicators_data = indicators.compute_all(df_m15, df_h1)
 
         # 3. Screenshot (debug) + Chart genere pour OCR v2.1
         screenshot_path = screenshots.capture_chart(sym)

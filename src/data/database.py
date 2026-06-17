@@ -54,8 +54,7 @@ def _init_tables(db: sqlite3.Connection) -> None:
             reasoning TEXT,
             closed_at TEXT,
             close_price REAL,
-            profit REAL,
-            close_reason TEXT
+            profit REAL
         );
 
         CREATE TABLE IF NOT EXISTS analysis_logs (
@@ -89,19 +88,10 @@ def _init_tables(db: sqlite3.Connection) -> None:
     """)
     db.commit()
 
-    # Migration automatique pour les bases de donnees existantes
-    try:
-        db.execute("ALTER TABLE trades ADD COLUMN close_reason TEXT")
-        db.commit()
-        logger.info("Migration: Colonne 'close_reason' ajoutee a la table trades.")
-    except sqlite3.OperationalError:
-        # La colonne existe deja
-        pass
-
 
 def log_analysis(symbol, timeframe, decision, screenshot_path, indicators, calendar_events, was_executed) -> int:
     """Enregistre une analyse IA. Retourne l'ID."""
-    db = get_db(symbol=symbol)
+    db = get_db()
     cursor = db.execute(
         """INSERT INTO analysis_logs (timestamp, symbol, timeframe, decision_action, decision_confidence, decision_reasoning, screenshot_path, indicators_snapshot, calendar_snapshot, was_executed)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -126,19 +116,19 @@ def log_trade_open(ticket, symbol, direction, volume, open_price, stop_loss, tak
     return cursor.lastrowid
 
 
-def log_trade_close(ticket, close_price, profit, reason: str = "EXPERT", symbol: str | None = None) -> None:
+def log_trade_close(ticket, close_price, profit, symbol: str | None = None) -> None:
     """Met a jour un trade avec les infos de fermeture.
     v4.1: Accepte un symbole explicite pour ecrire dans la bonne DB."""
     db = get_db(symbol=symbol)
-    db.execute("UPDATE trades SET closed_at = ?, close_price = ?, profit = ?, close_reason = ? WHERE ticket = ? AND closed_at IS NULL",
-               (datetime.now().isoformat(), close_price, profit, reason, ticket))
+    db.execute("UPDATE trades SET closed_at = ?, close_price = ?, profit = ? WHERE ticket = ? AND closed_at IS NULL",
+               (datetime.now().isoformat(), close_price, profit, ticket))
     db.commit()
-    logger.info(f"Trade {ticket} ferme dans la DB - Profit: {profit:.2f} - Raison: {reason}")
+    logger.info(f"Trade {ticket} ferme dans la DB - Profit: {profit:.2f}")
 
 
 def get_recent_trades(limit=20, symbol: str | None = None) -> list:
     """Retourne les derniers trades, filtres par symbole si fourni (BUG-get_recent_trades)."""
-    db = get_db(symbol=symbol)
+    db = get_db()
     if symbol:
         rows = db.execute(
             "SELECT * FROM trades WHERE symbol = ? ORDER BY opened_at DESC LIMIT ?",
@@ -151,7 +141,7 @@ def get_recent_trades(limit=20, symbol: str | None = None) -> list:
 
 def get_statistics(symbol: str | None = None) -> dict:
     """Calcule les statistiques de trading, filtrees par symbole si fourni (INC-B fix)."""
-    db = get_db(symbol=symbol)
+    db = get_db()
     stats = {}
     # Filtrer par symbole pour eviter de melanger les stats multi-paires
     sym_filter = "AND symbol = ?" if symbol else ""

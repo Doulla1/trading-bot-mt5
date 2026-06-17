@@ -24,7 +24,7 @@ from src.data.calendar import fetch_events, filter_relevant_events
 from src.data.database import get_db, log_analysis, log_trade_open, log_trade_close, get_recent_trades, get_statistics
 
 
-# Configuration des symboles (Majeures + Crosses pour diversification)
+# Configuration des 6 symboles
 SYMBOLS = [
     {"symbol": "EURUSD", "timeframe": "M15", "magic": 73456, "interval_min": 15},
     {"symbol": "GBPUSD", "timeframe": "M15", "magic": 73457, "interval_min": 15},
@@ -32,10 +32,6 @@ SYMBOLS = [
     {"symbol": "USDJPY", "timeframe": "M15", "magic": 73459, "interval_min": 15},
     {"symbol": "USDCHF", "timeframe": "M15", "magic": 73460, "interval_min": 15},
     {"symbol": "XAUUSD", "timeframe": "H1",   "magic": 73461, "interval_min": 60},
-    # --- CROSSES NON-USD ---
-    {"symbol": "EURGBP", "timeframe": "M15", "magic": 73462, "interval_min": 15},
-    {"symbol": "EURJPY", "timeframe": "M15", "magic": 73463, "interval_min": 15},
-    {"symbol": "GBPJPY", "timeframe": "M15", "magic": 73464, "interval_min": 15},
 ]
 
 # Compteurs pour savoir quel symbole doit tourner a chaque round
@@ -92,16 +88,7 @@ def _reconcile_closed_positions(sym: str) -> None:
                     close_deal = next((d for d in deals if d.entry == 1), None)
                 if close_deal:
                     total_profit = close_deal.profit + close_deal.commission + close_deal.swap
-                    
-                    # Determiner la raison via le commentaire MT5 (souvent "sl", "tp", ou vide)
-                    reason = "EXPERT"
-                    comment = close_deal.comment.lower() if close_deal.comment else ""
-                    if "sl" in comment:
-                        reason = "SL"
-                    elif "tp" in comment:
-                        reason = "TP"
-                        
-                    log_trade_close(ticket, close_deal.price, total_profit, reason=reason, symbol=sym)
+                    log_trade_close(ticket, close_deal.price, total_profit, symbol=sym)
                 else:
                     # Ne pas logguer 0.0 si on ne trouve pas le deal ! Reessayer plus tard
                     logger.warning(f"Position {ticket} fermee mais deal introuvable, tentative differee")
@@ -175,63 +162,30 @@ def run_symbol(cfg: dict) -> None:
     # Reconciliation
     _reconcile_closed_positions(sym)
 
-    # v4.2: Suspendre le trading si on est en fermeture de week-end (après vendredi 20h30 UTC)
-    from src.ai.strategy import is_weekend_closure
-    if is_weekend_closure(datetime.now(timezone.utc)):
-        logger.info(f"[{sym}] Période de fermeture du week-end active (après vendredi 20h30 UTC). Nouvelle analyse suspendue.")
-        return
-
     if not bridge.is_market_open():
         logger.info(f"[{sym}] Marche ferme")
         return
 
-    # Indicateurs M15 + H1 + H4
+    # Indicateurs M15 + H1
     df_m15 = bridge.get_rates(sym, "M15", count=200)
     df_h1 = bridge.get_rates(sym, tf if tf == "H1" else "H1", count=100) if tf != "H1" else None
-    df_h4 = bridge.get_rates(sym, "H4", count=50) if tf != "H4" and tf != "H1" else None
-    
-    # Recupere le spread en pips
-    symbol_info = bridge.get_symbol_info(sym)
-    spread = None
-    if symbol_info:
-        spread_points = symbol_info.get("spread", 0)
-        if symbol_info.get("digits", 5) in [3, 5]:
-            spread = spread_points / 10.0
-        else:
-            spread = float(spread_points)
-            
-    ind_data = indicators.compute_all(df_m15, df_h1, df_h4, spread=spread)
+    ind_data = indicators.compute_all(df_m15, df_h1)
+
+    # Chart genere
+    chart_path = chart_renderer.render_analysis_chart(df_m15, ind_data, sym)
 
     # Calendrier
     all_events = fetch_events()
     relevant = filter_relevant_events(all_events, sym)
 
     if _has_high_impact_news_soon(relevant):
-        logger.warning(f"[{sym}] News HIGH imminente (<30 min) - Mode protection active")
-        
-        # Liquidation d'urgence des positions ouvertes pour eviter le slippage
-        open_pos = executor.get_open_positions(sym)
-        if open_pos:
-            logger.warning(f"[{sym}] Cloture d'urgence de {len(open_pos)} position(s) ouverte(s) avant l'annonce !")
-            for pos in open_pos:
-                res = executor.close_position(pos["ticket"])
-                if res.success:
-                    logger.info(f"[{sym}] Trade {pos['ticket']} securise (Ferme avant News)")
-                    # Force la reconciliation immediate pour eviter le log 0.0
-                    _reconcile_closed_positions(sym)
-        
-        logger.info(f"[{sym}] Pas d'execution (pause pendant la tempete)")
+        logger.info(f"[{sym}] News HIGH - pas d'execution")
         return
 
-    # Chart genere et OCR (Rendu optionnel via USE_VISION_OCR pour eviter hallucinations et latence)
-    chart_path = None
+    # OCR
     ocr_data = None
-    if settings.use_vision_ocr:
-        chart_path = chart_renderer.render_analysis_chart(df_m15, ind_data, sym)
-        if chart_path:
-            ocr_data = extract_chart_structure(chart_path, sym, tf)
-    else:
-        logger.debug(f"[{sym}] OCR desactive (settings.use_vision_ocr=False)")
+    if chart_path:
+        ocr_data = extract_chart_structure(chart_path, sym, tf)
 
     # DeepSeek
     open_positions = executor.get_open_positions(sym)
@@ -281,22 +235,6 @@ def run_all() -> None:
                 continue
 
             try:
-                # 1. Gestion active et réconciliation de tous les symboles à chaque round
-                from src.config import settings
-                for cfg in SYMBOLS:
-                    sym = cfg["symbol"]
-                    tf = cfg["timeframe"]
-                    magic = cfg["magic"]
-                    
-                    # Surcharge temporaire des settings pour la gestion technique
-                    settings.trading_symbol = sym
-                    settings.trading_timeframe = tf
-                    settings.mt5_magic_number = magic
-                    
-                    manage_open_positions()
-                    _reconcile_closed_positions(sym)
-
-                # 2. Analyse IA complète pour les symboles dont la période est échue
                 for cfg in SYMBOLS:
                     if _should_run(cfg, round_num):
                         run_symbol(cfg)

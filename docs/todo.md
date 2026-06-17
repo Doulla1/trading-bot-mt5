@@ -1,3 +1,18 @@
+# Todo - Analyse des 5 derniers trades
+
+**Debut** : 2026-06-17 22:49
+**Fin** : 2026-06-17 23:05
+
+## Taches
+
+- [x] Explorer la structure du projet et la strategie
+- [x] Recuperer les 5 derniers trades
+- [x] Analyser chaque trade en profondeur
+- [x] Diagnostiquer si probleme de strategie ou de chance
+- [x] Rediger recommandations
+
+---
+
 # Todo - Correctifs post-analyse 03-05 Juin 2026
 
 **Debut** : 2026-06-05 00:46
