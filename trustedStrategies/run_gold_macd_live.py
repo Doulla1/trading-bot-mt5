@@ -459,4 +459,30 @@ def run_loop():
 
 if __name__ == "__main__":
     setup_logger()
+    
+    # Éviter les doublons de processus pour run_gold_macd_live.py
+    import subprocess
+    import os
+    
+    def is_already_running(script_name: str) -> bool:
+        try:
+            if os.name == 'nt':
+                cmd = 'wmic process where "name=\'python.exe\' or name=\'pythonw.exe\'" get commandline'
+                output = subprocess.check_output(cmd, shell=True, text=True)
+                count = 0
+                for line in output.split('\n'):
+                    if script_name in line:
+                        count += 1
+                return count > 1
+            else:
+                output = subprocess.check_output(f"pgrep -f {script_name}", shell=True, text=True)
+                pids = [p for p in output.strip().split('\n') if p]
+                return len(pids) > 1
+        except Exception:
+            return False
+
+    if is_already_running("run_gold_macd_live.py"):
+        logger.warning("Une autre instance de run_gold_macd_live.py est deja en cours d'execution. Arret.")
+        sys.exit(0)
+        
     run_loop()

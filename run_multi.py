@@ -255,15 +255,44 @@ def run_all() -> None:
         time.sleep(15 * 60)  # 15 min entre chaque round
 
 
+def is_already_running(script_name: str) -> bool:
+    """Evite les doublons de processus en verifiant les instances actives."""
+    import subprocess
+    import os
+    try:
+        if os.name == 'nt':
+            cmd = 'wmic process where "name=\'python.exe\' or name=\'pythonw.exe\'" get commandline'
+            output = subprocess.check_output(cmd, shell=True, text=True)
+            count = 0
+            for line in output.split('\n'):
+                if script_name in line:
+                    count += 1
+            return count > 1
+        else:
+            output = subprocess.check_output(f"pgrep -f {script_name}", shell=True, text=True)
+            pids = [p for p in output.strip().split('\n') if p]
+            return len(pids) > 1
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
     setup_logger()
     
-    # Lancement automatique du robot Gold MACD Divergence en arriere-plan
-    import subprocess
-    import sys
-    
-    gold_bot_path = Path(__file__).resolve().parent / "trustedStrategies" / "run_gold_macd_live.py"
-    logger.info(f"Demarrage automatique du robot Gold MACD Divergence : {gold_bot_path}")
-    subprocess.Popen([sys.executable, str(gold_bot_path)])
+    # 1. Eviter les doublons pour run_multi.py
+    if is_already_running("run_multi.py"):
+        logger.warning("Une autre instance de run_multi.py est deja en cours d'execution. Arret.")
+        sys.exit(0)
+        
+    # 2. Lancement automatique du robot Gold MACD Divergence en arriere-plan si non actif
+    if not is_already_running("run_gold_macd_live.py"):
+        import subprocess
+        import sys
+        
+        gold_bot_path = Path(__file__).resolve().parent / "trustedStrategies" / "run_gold_macd_live.py"
+        logger.info(f"Demarrage automatique du robot Gold MACD Divergence : {gold_bot_path}")
+        subprocess.Popen([sys.executable, str(gold_bot_path)])
+    else:
+        logger.info("Le robot Gold MACD Divergence est deja actif en arriere-plan. Pas de demarrage doublon.")
     
     run_all()
