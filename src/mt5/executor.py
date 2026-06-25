@@ -124,12 +124,13 @@ def close_position(ticket, symbol=None) -> TradeResult:
 
 
 def get_open_positions(symbol=None) -> list:
-    """Retourne les positions ouvertes."""
+    """Retourne les positions ouvertes pour le symbole et magic number actif."""
     sym = symbol or settings.trading_symbol
     positions = mt5.positions_get(symbol=sym)
     if positions is None:
         return []
-    return [p._asdict() for p in positions]
+    # Filtrer par magic number pour isoler les strategies paralleles sur le meme symbole
+    return [p._asdict() for p in positions if p.magic == settings.mt5_magic_number]
 
 
 def count_open_positions(symbol=None) -> int:

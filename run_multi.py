@@ -257,4 +257,13 @@ def run_all() -> None:
 
 if __name__ == "__main__":
     setup_logger()
+    
+    # Lancement automatique du robot Gold MACD Divergence en arriere-plan
+    import subprocess
+    import sys
+    
+    gold_bot_path = Path(__file__).resolve().parent / "trustedStrategies" / "run_gold_macd_live.py"
+    logger.info(f"Demarrage automatique du robot Gold MACD Divergence : {gold_bot_path}")
+    subprocess.Popen([sys.executable, str(gold_bot_path)])
+    
     run_all()

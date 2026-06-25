@@ -2,6 +2,8 @@
 
 > Ce bot ne dispose pas d'API REST ou GraphQL. Il s'agit d'un programme autonome en boucle. Ce document decrit les **interfaces internes** entre les modules.
 
+> Pour le module `src/pivots/` (points pivots multi-timeframe), voir la [reference API dediee](pivots.md).
+
 ## Interface : MT5 Bridge
 
 ### Connexion / Deconnexion

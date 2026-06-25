@@ -98,6 +98,15 @@ flowchart LR
 
 ## Modules internes v2.1
 
+### `src/pivots/` - Points Pivots Multi-Timeframe (v2.3)
+
+| Fichier | Responsabilite |
+|---|---|
+| `types.py` | Dataclass `PivotLevels` + 5 fonctions de calcul (Classic, Camarilla, Woodie, Fibonacci, CPR) + helpers pipeline (daily/weekly/monthly, alignement intraday) |
+| `__init__.py` | Re-export de l'API publique |
+
+Voir [ADR-005](decision-records/ADR-005-module-pivots-multi-timeframe.md) et [Reference API](../../4-technique/pivots.md).
+
 ### `src/config.py`
 Configuration centralisee via `pydantic-settings`. Charge le `.env`, chemins isoles par symbole.
 
@@ -189,4 +198,6 @@ flowchart TD
     indicators --> config
     calendar --> config
     logger --> config
+    pivot_study --> pivots
+    pivot_backtest --> pivots
 ```

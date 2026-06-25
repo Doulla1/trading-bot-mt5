@@ -1,3 +1,36 @@
+# Todo - Stratégie retournement Points Pivots EURUSD/XAUUSD
+
+**Début** : 2026-06-25 00:29
+**Fin** : 2026-06-25 00:41
+
+## Tâches
+
+- [x] Construire le module pivots enrichi (src/pivots/types.py) - Classic, Camarilla, Woodie, Fibonacci, CPR
+- [x] Créer le script d'analyse statistique avancée (scratch/pivot_study_v2.py)
+- [x] Créer le script de backtesting stratégie (scratch/pivot_backtest_v2.py)
+- [x] Télécharger 12 mois de données EURUSD M15 + XAUUSD H1 depuis MT5
+- [x] Exécuter l'analyse statistique et générer les fichiers de stats
+- [x] Exécuter le backtesting de la stratégie
+- [x] Analyser les résultats et rédiger les conclusions
+- [x] Mettre à jour les tests
+- [x] Mettre à jour la documentation
+
+---
+
+# Todo - Analyse approfondie des 35 trades (pertes et TP)
+
+**Debut** : 2026-06-24 22:57
+**Fin** : 2026-06-24 23:00
+
+## Taches
+
+- [x] Explorer la structure du projet et la strategie
+- [x] Extraire les 35 trades (toute la base)
+- [x] Analyser chaque trade en profondeur (pips, duree, raison fermeture)
+- [x] Analyser le comportement TP/SL (taux de reussite)
+- [x] Rediger le rapport complet d'analyse
+
+---
 # Todo - Analyse des 5 derniers trades
 
 **Debut** : 2026-06-17 22:49
@@ -73,3 +106,4 @@
 - [x] Analyser les patterns de pertes par symbole
 - [x] Identifier les d�fauts du syst�me
 - [x] R�diger le rapport d'analyse
+
